@@ -1,0 +1,250 @@
+﻿Portland State University Computer Science Group				David Westgate
+Request for Comments: CS594								   02 Nov 2023
+
+
+Internet Relay Chat Protocol
+
+Status of This Memo
+	This memo defines a personal re-implementation of the already well established Internet Relay Chat Protocol, by presenting a simplified version using a subset of the full feature list defined in RFC 1459. This protocol does not add anything new to the well established IRC protocol, and is intended for academic purposes.
+
+Abstract
+	The IRC Protocol was developed in the early 1990’s as a simple method for internet users to communicate in real time, with the ability to organize various combinations of groups of users. Although once a popular means of internet communication, IRC has to some extent become niche as other instant messengers and social media platforms have become mainstream. IRC is uniquely fascinating from a privacy perspective in that anyone can run a server for their friends or the world and ensure they are the custodians of their data. 
+
+
+Table of Contents
+
+1. Introduction, Scope
+2. Protocol Overview
+	2.1. Basic Features
+	2.2. Opcodes
+	2.3. Communication Flow
+3. Server
+	3.1. Server Initialization
+	3.2. Handling Clients
+	3.3. User Management
+	3.4. Room Management
+4. Client
+	4.1. Client Initialization
+	4.2. User Interaction
+	4.3. Commands
+		4.3.1 {message}
+		4.3.2 /msg [room,room…] {message}
+		4.3.3 /list
+		4.3.4. /join {room name}
+		4.3.5. /my-rooms
+		4.3.6. /show {room}
+		4.3.7. /leave {room name}
+		4.3.8. /quit
+5. Error Handling
+	5.1 Codes
+	5.2. Server experienced Errors	
+		5.2.1 Attempt to message a room which does not exist
+		5.2.2 Nickname collision
+		5.2.3 No KEEP_ALIVE
+	5.3. Client experienced Errors
+		5.3.1 Handling ERROR_INVALID_ROOM
+		5.3.2 Handling NICKNAME_COLLISION
+		5.3.3 Network failure
+		5.3.3 No RESPONSE to client message
+6. Conclusion
+	6.1. Limitations/Omissions
+	6.2. Security Considerations + Privacy
+	6.3. Future
+	6.4. References
+1. Introduction, Scope
+	Internet Relay Chat uses a client-server architecture to allow users (identified by nicknames) running a client application to establish a connection to a server application. Once connected, clients will be able to create, join, and leave multiple rooms, as well as send messages to other clients who are also members of those rooms. These are the core functionalities. Clients are also able to perform functions such as list all of the available rooms to join on the server, as well as listing all members of any particular room. Individual messages that clients send may be to one or more rooms. 
+
+2. Protocol Overview
+	This IRC protocol is implement as a payload over TCP. TCP is a natural base layer protocol choice over IP for its ability to ensure data arrives uncorrupted and in-order.
+
+2.1. Basic Features
+	The protocol specifies “messages” sent from client to server, or server to client. Each message shall be composed of command, and optional command parameter if relevant. Commands are one of an 8 bit operation code (hexadecimal 01 to 0F), followed immediately by the opcode parameter
+
+2.2. Opcodes
+	Each opcode listed below will be elaborated on in the relevant section. If the opcode is expected to be followed by a parameter, it is shown in {}.
+
+	0x01: JOIN_ROOM {room}
+	0x02: JOIN_SERVER
+	0x03: LEAVE_ROOM {room}
+	0x04: LIST_ROOMS
+	0x05: SEND_MESSAGE {message}
+	0x06: 
+	0x07:
+	0x08:
+	0x09:
+	0x0A:
+	0x0B: QUIT
+	0x0C: KEEP_ALIVE
+	0x0D: RESPONSE {message}
+	0x0E: RESPONSE_OK
+	0x0F: ERROR {error code}
+
+2.3. Communication Flow
+	Both the client and server may send instructions, which are the above Opcodes followed by their optional parameters. Both applications should expect a RESPONSE to each instruction, again which may have an optional parameter. Codes 0x01 to 0x05 are sent from the client, and the rest may be sent from either client or server
+
+3. Server
+	It is critical the server application run with stability and accuracy to ensure client messages are correctly received, processed, and acted upon. 
+
+3.1. Server Initialization
+	On start-up, the server application will read from storage a list of rooms (which may exist from a previous instance) and users associated with those rooms. The server will then create the rooms and associate the users. The server will then listen for TCP connections on port 6667
+
+3.2. Handling Clients
+	From this point, the server is responsible for keeping track of how many channels exist, the names of each channel, and the users associated with each channel, which as stated above should be persistent. Also, a list of the currently connected users by their nicknames will be kept track.
+
+3.3. User Management
+	User management is handled simplistically. There is no authentication among nicknames, and the honor system will be relied on to prevent impersonation. A  maximum number of users connected to the server at anytime of 20 will be imposed (to guarantee performance and reliability), but rooms will have no user limit.
+
+3.4. Room Management
+	Rooms are to be created implicitly, as soon as the first user joins a room by a unique name, and rooms will be implicitly destroyed when the last user leaves. Rooms will be identified by a name between 3 and 20 characters, and are case insensitive. Messages sent to a room will be automatically forwarded by the server to all active users in the room. Users who are part of a room and then disconnect from the server, will automatically re-join the room on re-connecting to the server.
+
+4. Client
+	Clients are the users, running the client application on their local machines. 
+
+4.1. Client Initialization
+	Clients who have never before used the application will first be prompted to choose a nickname. After this the client will then be prompted to enter the host-name of the server they wish to connect to. If a client has already connected to a host, they will be asked if they want to re-connect to this host, or choose a new one. Client will ask to JOIN_SERVER to the host, and await a RESPONSE_OK or ERROR
+	
+4.2. User Interaction
+	After a RESPONSE OK from attempting to connect to the hostname, the client is now a user of the server. The client application will present them with the standard input and output to show the information, server messages, and prompt for keyboard input
+
+4.3. Commands
+	The following commands are available on the standard input to users who have successfully connected to a host. The /help command will also list these
+
+4.3.1 {message}
+	Any standard input not starting with / is assumed to be a message for the current active room. It is transmitted as a SEND_MESSAGE {message} operation
+
+4.3.2 /msg [room,room…] {message}
+	With this command, one or more valid room names may be included in a comma separated list in square brackets, followed by a space and then the message. There are a number of potential errors with this command which will be explored in the error handling section
+
+4.3.3 /list
+	A simple command which shall send LIST_ROOMS operation to the server and show the user the RESPONSE {data} , which is expected to contain a list of the available rooms
+
+
+4.3.4. /join {room name}
+	Send a JOIN_ROOM operation with the room name and await a RESPONSE OK from the server. This is not expected to encounter any specific errors, as rooms which do not already exist are created. The client will enforce the character limits.
+
+4.3.5. /my-rooms
+	A simple command which shall show the user which rooms they are currently a member of. This is kept track of by the client application.
+
+4.3.6. /show {room}
+	Rotate standard out to show the specified room, which the user should already have joined. If the room specified is not one they are already in, let the user know they must join it first.
+
+
+4.3.7. /leave {room name}
+	Send a LEAVE_ROOM operation with the room name and await a response
+
+4.3.8. /quit
+	Send a QUIT operation to the server and await a RESPONSE OK. Then, the client will be prompted with the standard output as shown when the application first starts.
+
+5. Error Handling
+	Errors may occur in various ways, the most likely being an illegal instruction sent from the client. Network or connection errors may also occur and must be handled gracefully.
+
+5.1 Codes
+	Error codes shall be 8 bit values both understood by the client and server
+
+	0x10 – ERROR_INVALID_ROOM
+	0x11 - NICKNAME_COLLISION
+	0x12 
+	0x13
+	0x14
+	0x15
+	0x16
+	0x17
+	0x18
+	0x19
+	0x1A
+	0x1B
+	0x1C
+	0x1D
+	0x1E
+	0x1F
+
+5.2. Server experienced Errors
+	These are errors the server may have to handle
+
+5.2.1 Attempt to message a room which does not exist
+	A user may attempt to /msg and list one or more rooms which do not exist. For the sake of simplicity, this will be handled with partial grace. If at-least one room in the list exists, the server will silently ignore the invalid rooms and respond with RESPONSE OK. However, if no rooms exist, the server shall respond ERROR_INVALID_ROOM.
+
+5.2.2 Nickname collision
+	A user may attempt to connect to a server with a nickname that is already in use by a connected user. In this case, the server will response with NICKNAME_COLLISION, and the client will understand that it was not able to connect.
+
+5.2.3 No KEEP_ALIVE
+	The server is expected to see a KEEP_ALIVE message from the client every 30 seconds, to which it will send a RESPONSE_OK. If this message is not received at-least every 45 seconds, the server will considered the client disconnected and shall send it the QUIT message to let it know just in case.
+	
+5.3. Client experienced Errors
+
+5.3.1 Handling ERROR_INVALID_ROOM
+	In this event, we let the user know they attempted to send a message to an invalid room
+
+5.2.2 Handling NICKNAME_COLLISION
+	In this event, the user will be told there was a nickname collision and they must choose a different nickname to connect to the server.
+
+5.3.3 Network failure
+	The nature of TCP with its acknowledgments allows the client application to detect if a message was infact received by the server. If there is a TCP socket interruption, the client will be disconnected and informed there may be a server or network issue
+
+5.3.3 No RESPONSE to client message
+	If the client does not receive an expected response to any message, this may indicate that the server is online, but in a broken state. The user will be notified they should try their message again, or contact the server operator through another channel to investigate the issue. A well engineered server application should make this unlikely.
+
+6. Conclusion
+6.1. Limitations/Omissions
+	This IRC implementation knowingly omits useful features that mainstream IRC implements, for the sake of simplicity. These include (but are not limited to) the following:
+	Private messages between users
+	Server admins and channel operators
+	Server to Server distributed architecture
+	File transfers
+	Metadata like channel topics
+	Away messages
+	Password based authentication
+	Real name/nickname associations
+	Rich text interpretation
+	Encryption
+	Version validation 
+	Non-english client application support
+	Server whitelist/blacklist
+
+6.2. Security Considerations + Privacy
+	Since the body of TCP packets are visible to the network and could be snooped on by a potentially interested party, modern web applications generally run on an encryption layer like SSL or TLS. However, due to the extra complexity of including such a layer in this application, transmission will be both sent and received unencrypted. Therefor, the application will remind the user before each session not to send sensitive or private information with this application.	
+
+6.3. Future
+	This IRC implementation attempts to faithfully provide reliable internet chat for a group of users who trust one another, and to give them the ability to organize by channel. Of the noted omissions, the must urgent future update will include version validation, followed by an SSL encryption layer. Secondary future feature needs will focus on authentication, private messaging. Ideally, all remaining omissions would be included in the later future.
+
+6.4. References
+	References listed have helped inspire this RFC
+
+IRC 1459
+	https://datatracker.ietf.org/doc/html/rfc1459
+	
+CS594 Sample RFC 
+	https://canvas.pdx.edu/courses/74411/files/8984668/download?download_frd=1
+	
+IRC Grading Criteria	
+	https://canvas.pdx.edu/courses/74411/files/8984635/download?download_frd=1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
