@@ -3,5 +3,14 @@
 version = 3
 
 [[package]]
+name = "prompted"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d34cf5bf48e2fe6e11fb6b619fb5962530f1eaf278709de5f8ea49afa7379f9b"
+
+[[package]]
 name = "rust-irc"
 version = "0.1.0"
+dependencies = [
+ "prompted",
+]
