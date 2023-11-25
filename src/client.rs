@@ -1,6 +1,6 @@
 use prompted::input;
-use rust_irc::codes::client::*;
-use std::io::{ Read, Write};
+use rust_irc::codes;
+use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::thread;
 
@@ -12,8 +12,8 @@ fn read_messages(mut stream: TcpStream) {
                 if size == 0 {
                     break; //Server closed connection
                 }
-                let message: &[u8] = &buffer[..size];
-                process_message(message);
+                let msg_bytes: &[u8] = &buffer[..size];
+                process_message(msg_bytes);
             }
             Err(_) => {
                 break;
@@ -22,11 +22,61 @@ fn read_messages(mut stream: TcpStream) {
     }
 }
 
-fn process_message(message: &[u8]) {
-    if let Ok(text) = String::from_utf8(message.to_vec()) {
-        println!("from serv: {}", text);
+fn process_message(msg_bytes: &[u8]) {
+    match msg_bytes[0] {
+        codes::ERROR => {
+            #[cfg(debug_assertions)]
+            println!("err: {:x?}", msg_bytes[1]);
+            match msg_bytes[1] {
+                codes::error::INVALID_ROOM => {
+                    println!("Attempted to message non-existant room. Try again");
+                }
+                codes::error::NICKNAME_COLLISION => {
+                    println!(
+                        "Nickname already in use on server. Connect again with a different one"
+                    );
+                    disconnect();
+                }
+                codes::error::SERVER_FULL => {
+                    println!("Server is full. Try again later");
+                    disconnect();
+                }
+                _ => {
+                    #[cfg(debug_assertions)]
+                    println!("Unknown error code {:x?}", msg_bytes[1]);
+                }
+            }
+        }
+        codes::RESPONSE_OK => {
+            #[cfg(debug_assertions)]
+            println!("RESPONSE_OK");
+        }
+        codes::RESPONSE => {
+            let message = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
+            println!("{}", message);
+        }
+        _ => {
+            #[cfg(debug_assertions)]
+            println!("BAD RESPONSE = {:x?} ", msg_bytes[0]);
+        }
     }
 }
+
+fn disconnect() {}
+
+fn rooms(stream: &mut TcpStream) {
+    stream.write(&[codes::client::LIST_ROOMS]);
+}
+fn users(stream: &mut TcpStream) {
+    stream.write(&[codes::client::LIST_USERS]);
+}
+
+fn msg(stream: &mut TcpStream) {}
+
+fn join(stream: &mut TcpStream) {}
+
+fn show(stream: &mut TcpStream) {}
+fn leave(stream: &mut TcpStream) {}
 
 pub fn start() {
     println!("Starting the IRC client");
@@ -37,34 +87,32 @@ pub fn start() {
     if let Ok(mut stream) = TcpStream::connect(host.to_owned() + ":6667") {
         println!("Connected to {}", host);
 
-        //try to register the nickname
-        let mut buf: Vec<u8> = vec![0; nick.capacity()];
-        buf[0] = REGISTER_NICK;
-        for i in 1..nick.len()+1 {
-            buf[i] = *nick.as_bytes().get(i - 1).unwrap();
-        }
-        stream.write(&buf);
-
         //another stream for reading messages
         let stream_clone: TcpStream = stream.try_clone().expect("Failed to clone stream");
         thread::spawn(move || {
             read_messages(stream_clone);
         });
 
+        //try to register the nickname
+        let mut buf: Vec<u8> = vec![0; nick.capacity()];
+        buf[0] = codes::client::REGISTER_NICK;
+        for i in 1..nick.len() + 1 {
+            buf[i] = *nick.as_bytes().get(i - 1).unwrap();
+        }
+        stream.write(&buf);
+
         loop {
             let cmd: String = input!(":");
             match cmd.trim() {
-                "/quit" => {}
-                "/list" => {}
-                "/msq" => {}
-                "/join" => {}
-                "/show" => {}
-                "/leave" => {}
-                "/msg" => {}
+                "/quit" => disconnect(),
+                "/rooms" => rooms(&mut stream),
+                "/users" => users(&mut stream),
+                "/join" => join(&mut stream),
+                "/show" => show(&mut stream),
+                "/leave" => leave(&mut stream),
+                "/msg" => msg(&mut stream),
 
-                _ => {
-                    stream.write(cmd.as_bytes());
-                }
+                _ => msg(&mut stream),
             }
         }
     } else {

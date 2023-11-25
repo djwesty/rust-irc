@@ -7,6 +7,7 @@ pub mod codes {
         pub const LIST_ROOMS: u8 = 0x04;
         pub const SEND_MESSAGE: u8 = 0x05;
         pub const REGISTER_NICK: u8 = 0x06;
+        pub const LIST_USERS: u8 = 0x07;
     }
     pub const KEEP_ALIVE: u8 = 0x0C;
     pub const RESPONSE: u8 = 0x0D;

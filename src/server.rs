@@ -27,31 +27,90 @@ impl Server {
     }
 
     fn handle_client(&mut self, mut stream: TcpStream) {
-        let mut buffer: [u8; 1024] = [0; 1024];
-        let nickname: String;
+        // handle user commands
 
-        // Read the nickname from the client
-        match stream.read(&mut buffer) {
-            Ok(size) => {
-                let nickname_bytes = &buffer[0..size];
-                nickname = String::from_utf8_lossy(nickname_bytes).to_string();
+        loop {
+            let mut buf_in: [u8; 1024] = [0; 1024];
+
+            match stream.read(&mut buf_in) {
+                Ok(size) => {
+                    let cmd_bytes: &[u8] = &buf_in[0..1];
+                    let param_bytes: &[u8] = &buf_in[1..size];
+                    #[cfg(debug_assertions)]
+                    println!("Stream in ");
+                    match cmd_bytes[0] {
+                        codes::client::REGISTER_NICK => {
+                            #[cfg(debug_assertions)]
+                            println!("REGISTER_NICK");
+                            let nickname: String = String::from_utf8_lossy(param_bytes).to_string();
+                            self.register_nick(nickname, &mut stream);
+                        }
+                        codes::client::LIST_ROOMS => {
+                            #[cfg(debug_assertions)]
+                            println!("LIST_ROOMS");
+                            let mut buf_out: Vec<u8> = Vec::new();
+                            buf_out.extend_from_slice(&[codes::RESPONSE]);
+                            for (room, user) in &self.rooms {
+                                buf_out.extend_from_slice(room.as_bytes());
+                            }
+                            stream.write(&buf_out);
+                        }
+                        codes::client::LIST_ROOMS => {
+                            #[cfg(debug_assertions)]
+                            println!("LIST_ROOMS");
+                            let mut buf_out: Vec<u8> = Vec::new();
+                            buf_out.extend_from_slice(&[codes::RESPONSE]);
+                            for (room, user) in &self.rooms {
+                                buf_out.extend_from_slice(room.as_bytes());
+                            }
+                            stream.write(&buf_out);
+                        }
+                        codes::client::LIST_USERS => {
+                            #[cfg(debug_assertions)]
+                            println!("LIST_USERS");
+                            let mut buf_out: Vec<u8> = Vec::new();
+                            buf_out.extend_from_slice(&[codes::RESPONSE]);
+                            for (user) in &self.users {
+                                buf_out.extend_from_slice(user.as_bytes());
+                            }
+                            stream.write(&buf_out);
+                        }
+                        codes::client::JOIN_ROOM => {
+                            #[cfg(debug_assertions)]
+                            println!("JOIN_ROOM");
+                        }
+                        codes::client::LEAVE_ROOM => {
+                            #[cfg(debug_assertions)]
+                            println!("LEAVE_ROOM");
+                        }
+                        codes::client::SEND_MESSAGE => {
+                            #[cfg(debug_assertions)]
+                            println!("SEND_MESSAGE");
+                        }
+                        _ => {
+                            #[cfg(debug_assertions)]
+                            println!("Unspecified client Op");
+                        }
+                    }
+                }
+                Err(_) => return,
             }
-            Err(_) => return,
         }
+    }
 
+    fn register_nick(&mut self, nickname: String, stream: &mut TcpStream) {
         // Check for nickname collision
         if self.users.contains(&nickname) {
+            #[cfg(debug_assertions)]
+            println!("nickname collision, {}", nickname);
             stream.write_all(&[codes::ERROR, codes::error::NICKNAME_COLLISION]);
-            return;
+        } else {
+            // Add the user to the user list
+            self.users.insert(nickname.clone());
+
+            // Send response ok
+            stream.write_all(&[codes::RESPONSE_OK]);
         }
-
-        // Add the user to the user list
-        self.users.insert(nickname.clone());
-
-        // Send response ok
-        stream.write_all(&[codes::RESPONSE_OK]);
-
-        // handle user commands
     }
 }
 
@@ -87,7 +146,8 @@ pub fn start() {
             Ok(mut stream) => {
                 let mut cmd_buf: [i32; 2] = [0; 2];
                 let mut local_server = server_mutx.lock().unwrap();
-
+                #[cfg(debug_assertions)]
+                println!("match stream");
                 if local_server.users.len() < MAX_USERS {
                     local_server.handle_client(stream);
                 } else {
