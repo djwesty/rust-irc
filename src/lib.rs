@@ -1,10 +1,12 @@
 pub mod codes {
+    pub const END: u8 = 0x00;
     pub mod client {
         pub const JOIN_ROOM: u8 = 0x01;
         pub const JOIN_SERVER: u8 = 0x02;
         pub const LEAVE_ROOM: u8 = 0x03;
         pub const LIST_ROOMS: u8 = 0x04;
         pub const SEND_MESSAGE: u8 = 0x05;
+        pub const REGISTER_NICK: u8 = 0x06;
     }
     pub const KEEP_ALIVE: u8 = 0x0C;
     pub const RESPONSE: u8 = 0x0D;

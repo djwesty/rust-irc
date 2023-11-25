@@ -1,3 +1,4 @@
+use std::sync::{Arc, Mutex};
 use std::{
     collections::{HashMap, HashSet},
     io::{Read, Write},
@@ -5,6 +6,7 @@ use std::{
     thread,
 };
 
+use prompted::input;
 use rust_irc::codes;
 
 const SERVER_ADDRESS: &str = "0.0.0.0:6667";
@@ -50,30 +52,46 @@ impl Server {
         stream.write_all(&[codes::RESPONSE_OK]);
 
         // handle user commands
-        loop {
-            let mut cmd_buf = [0; 2];
-            println!("yo, {:?}", self.users);
-            // todo!();
-            break;
-        }
     }
 }
 
 pub fn start() {
     let listener: TcpListener = TcpListener::bind(SERVER_ADDRESS).expect("Failed to bind to port");
-    let server: Server = Server::new();
+    let server = Server::new();
+    let server_mutx = Arc::new(Mutex::new(server));
+    let io_thread = Arc::clone(&server_mutx);
+
     println!("Server listening on {}", SERVER_ADDRESS);
+
+    thread::spawn(move || loop {
+        println!("0: Quit Server");
+        println!("1: list connected users");
+        println!("2: list rooms");
+        let inp: String = input!(":");
+        let local_server = io_thread.lock().unwrap();
+        match inp.parse::<u8>() {
+            Ok(num) => match num {
+                0 => break,
+                1 => println!("Users: {:?}", local_server.users),
+                2 => println!("Rooms: {:?}", local_server.rooms),
+                _ => println!("Invalid Input"),
+            },
+            Err(_) => {
+                println!("Invalid input");
+            }
+        }
+    });
 
     for stream in listener.incoming() {
         match stream {
-            Ok(stream) => {
-                if server.users.len() < MAX_USERS {
-                    let mut server_clone = server.clone();
-                    thread::spawn(move || {
-                        server_clone.handle_client(stream);
-                    });
+            Ok(mut stream) => {
+                let mut cmd_buf: [i32; 2] = [0; 2];
+                let mut local_server = server_mutx.lock().unwrap();
+
+                if local_server.users.len() < MAX_USERS {
+                    local_server.handle_client(stream);
                 } else {
-                    // stream.write_all(&[codes::ERROR, codes::error::SERVER_FULL]);
+                    let _ = stream.write_all(&[codes::ERROR, codes::error::SERVER_FULL]);
                 }
             }
             Err(e) => {
