@@ -29,7 +29,7 @@ fn process_message(msg_bytes: &[u8]) {
             println!("err: {:x?}", msg_bytes[1]);
             match msg_bytes[1] {
                 codes::error::INVALID_ROOM => {
-                    println!("Attempted to message non-existant room. Try again");
+                    println!("Attempted to message or list non-existant room. Try again");
                 }
                 codes::error::NICKNAME_COLLISION => {
                     println!(
@@ -93,6 +93,7 @@ fn join(nick: &str, room: &str, stream: &mut TcpStream) {
 }
 
 fn show(stream: &mut TcpStream) {}
+
 fn leave(nick: &str, room: &str, stream: &mut TcpStream) {
     let size = room.to_string().capacity() + nick.to_string().capacity() + 2;
     let mut out_buf: Vec<u8> = vec![0; size];
@@ -108,6 +109,18 @@ fn leave(nick: &str, room: &str, stream: &mut TcpStream) {
     for i in 0..room.len() {
         out_buf[byte] = *room.as_bytes().get(i).unwrap();
         byte += 1;
+    }
+    stream.write(&out_buf);
+}
+
+fn list( room: &str, stream: &mut TcpStream) {
+    let size = room.to_string().capacity() +1;
+    let mut out_buf: Vec<u8> = vec![0; size];
+    out_buf[0] = codes::client::LIST_USERS_IN_ROOM;
+
+
+    for i in 1..room.len()+1 {
+        out_buf[i] = *room.as_bytes().get(i-1).unwrap();
     }
     stream.write(&out_buf);
 }
@@ -151,6 +164,11 @@ pub fn start() {
                 "/quit" => disconnect(),
                 "/rooms" => rooms(&mut stream),
                 "/users" => users(&mut stream),
+                "/list" => {
+                    let room = *cmds.get(1).unwrap();
+                    list(room, &mut stream);
+
+                }
                 "/join" => {
                     let room = *cmds.get(1).unwrap();
                     join(&nick, room, &mut stream)

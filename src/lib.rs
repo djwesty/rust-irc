@@ -8,12 +8,14 @@ pub mod codes {
         pub const SEND_MESSAGE: u8 = 0x05;
         pub const REGISTER_NICK: u8 = 0x06;
         pub const LIST_USERS: u8 = 0x07;
+        pub const LIST_USERS_IN_ROOM: u8 = 0x08;
     }
+    pub const QUIT: u8 = 0x0B;
     pub const KEEP_ALIVE: u8 = 0x0C;
     pub const RESPONSE: u8 = 0x0D;
     pub const RESPONSE_OK: u8 = 0x0E;
     pub const ERROR: u8 = 0x0F;
-    pub const QUIT: u8 = 0x0B;
+  
     pub mod error {
         pub const INVALID_ROOM: u8 = 0x10;
         pub const NICKNAME_COLLISION: u8 = 0x11;

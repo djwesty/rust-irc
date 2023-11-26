@@ -61,6 +61,25 @@ fn handle_client(
             stream.write(&buf_out);
         }
 
+        codes::client::LIST_USERS_IN_ROOM => {
+            let room: String = String::from_utf8_lossy(param_bytes).to_string();
+            let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+            let mut buf_out: Vec<u8> = Vec::new();
+            buf_out.extend_from_slice(&[codes::RESPONSE]);
+            match unlocked_server.rooms.get(&room) {
+                Some(l) =>{
+                    for ele in l {
+                        buf_out.extend_from_slice(ele.as_bytes());
+                        buf_out.extend_from_slice(&[0x20]);
+                    }
+                    stream.write_all(&buf_out);
+                },
+                None =>{
+                    stream.write_all(&[codes::ERROR, codes::error::INVALID_ROOM]);
+                }
+            }
+        }
+
         codes::client::JOIN_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Vec<&str> = p.split(' ').collect();
@@ -76,7 +95,7 @@ fn handle_client(
             let room = params.get(1).unwrap();
             leave_room(server, user, room, stream)
         }
-        
+
         codes::client::SEND_MESSAGE => {
             #[cfg(debug_assertions)]
             println!("SEND_MESSAGE");
@@ -129,6 +148,7 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
             l.retain(|item| item != user);
             if l.len() == 0 {
                 unlocked_server.rooms.remove(room);
+                stream.write_all(&[codes::RESPONSE_OK]);
             } else if l.len() == before_len {
                 stream.write_all(&[codes::ERROR, codes::error::INVALID_ROOM]);
             } else {
