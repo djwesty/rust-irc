@@ -73,7 +73,27 @@ fn users(stream: &mut TcpStream) {
 
 fn msg(stream: &mut TcpStream) {}
 
-fn join(stream: &mut TcpStream) {}
+fn join(nick: &str, room: &str, stream: &mut TcpStream) {
+    #[cfg(debug_assertions)]
+    println!("nick {} joining room s{} ", nick, room);
+    let size = room.to_string().capacity() + nick.to_string().capacity() + 2;
+    let mut out_buf: Vec<u8> = vec![0; size];
+    let mut byte:usize = 0;
+    out_buf[byte] = codes::client::JOIN_ROOM;
+    byte+=1;
+    for i in 0..nick.len()  {
+        out_buf[byte] = *nick.as_bytes().get(i).unwrap();
+        byte+=1;
+    }
+    out_buf[byte] = 0x20;
+    byte += 1;
+    for i in 0.. room.len() {
+        out_buf[byte] = *room.as_bytes().get(i).unwrap();
+        byte+=1;
+    }
+    stream.write(&out_buf);
+
+}
 
 fn show(stream: &mut TcpStream) {}
 fn leave(stream: &mut TcpStream) {}
@@ -102,12 +122,16 @@ pub fn start() {
         stream.write(&buf);
 
         loop {
-            let cmd: String = input!(":");
-            match cmd.trim() {
+            let inp: String = input!(":");
+            let cmds: Vec<_> = inp.split(" ").collect();
+            match *cmds.get(0).unwrap() {
                 "/quit" => disconnect(),
                 "/rooms" => rooms(&mut stream),
                 "/users" => users(&mut stream),
-                "/join" => join(&mut stream),
+                "/join" => {
+                    let room = *cmds.get(1).unwrap();
+                    join(&nick,room ,&mut stream)
+                },
                 "/show" => show(&mut stream),
                 "/leave" => leave(&mut stream),
                 "/msg" => msg(&mut stream),

@@ -19,7 +19,7 @@ struct Server {
 }
 
 impl Server {
-    fn new() -> Server {
+    fn new() -> Self {
         Server {
             users: HashSet::new(),
             rooms: HashMap::new(),
@@ -74,7 +74,14 @@ fn handle_client(
         }
         codes::client::JOIN_ROOM => {
             #[cfg(debug_assertions)]
-            println!("JOIN_ROOM");
+            println!("JOIN_ROOM ");
+
+            let p: String = String::from_utf8_lossy(param_bytes).to_string();
+        
+            let params: Vec<&str> = p.split(' ').collect();
+            let user = params.get(0).unwrap();
+            let room = params.get(1).unwrap();
+            join_room(server, *user, room, stream)
         }
         codes::client::LEAVE_ROOM => {
             #[cfg(debug_assertions)]
@@ -86,7 +93,7 @@ fn handle_client(
         }
         _ => {
             #[cfg(debug_assertions)]
-            println!("Unspecified client Op");
+            println!("Unspecified client Op, {:x?}", cmd_bytes);
         }
     }
 
@@ -95,7 +102,7 @@ fn handle_client(
 
 fn register_nick(server: &Arc<Mutex<Server>>, nickname: String, stream: &mut TcpStream) {
     // Check for nickname collision
-    let mut unlocked_server = server.lock().unwrap();
+    let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     if unlocked_server.users.contains(&nickname) {
         #[cfg(debug_assertions)]
         println!("nickname collision, {}", nickname);
@@ -106,6 +113,20 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: String, stream: &mut Tcp
 
         // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]);
+    }
+}
+
+fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut TcpStream) {
+    let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+
+    match unlocked_server.rooms.get_mut(room) {
+        Some(l) => {
+            l.push(user.to_string());
+        }
+        None => {
+            let list: Vec<String> = vec![user.to_string()];
+            unlocked_server.rooms.insert(room.to_string(), list);
+        }
     }
 }
 
@@ -120,16 +141,15 @@ pub fn start() {
             match tcpstream {
                 Ok(mut stream) => {
                     let mut buf_in: [u8; 1024] = [0; 1024];
-                    let server_innter = Arc::clone(&server_outer);
+                    let server_inner = Arc::clone(&server_outer);
 
                     thread::spawn(move || loop {
                         match stream.read(&mut buf_in) {
                             Ok(size) => {
-
                                 let cmd_bytes: &[u8] = &buf_in[0..1];
                                 let param_bytes: &[u8] = &buf_in[1..size];
 
-                                handle_client(&server_innter, &mut stream, cmd_bytes, param_bytes);
+                                handle_client(&server_inner, &mut stream, cmd_bytes, param_bytes);
                             }
                             Err(_) => {
                                 println!("Error parsing client");
