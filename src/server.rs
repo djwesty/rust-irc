@@ -1,6 +1,6 @@
 use std::sync::{Arc, Mutex};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     io::{Read, Write},
     net::{TcpListener, TcpStream},
     thread,
@@ -14,28 +14,28 @@ const MAX_USERS: usize = 20;
 
 #[derive(Debug)]
 struct Server {
-    users: HashSet<String>,
+    users: HashMap<String, TcpStream>,
     rooms: HashMap<String, Vec<String>>,
 }
 
 impl Server {
     fn new() -> Self {
         Server {
-            users: HashSet::new(),
+            users: HashMap::new(),
             rooms: HashMap::new(),
         }
     }
 }
 
-fn send_all(op:u8, listener: TcpListener) {
+fn message(room: &str, message: &str) {}
+
+fn send_all(op: u8, listener: TcpListener) {
     for tcpstream in listener.incoming() {
         match tcpstream {
             Ok(mut stream) => {
                 stream.write_all(&[op]).unwrap();
-            },
-            Err(_) => {
-
             }
+            Err(_) => {}
         }
     }
 }
@@ -69,7 +69,7 @@ fn handle_client(
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
             let mut buf_out: Vec<u8> = Vec::new();
             buf_out.extend_from_slice(&[codes::RESPONSE]);
-            for user in &unlocked_server.users {
+            for (user, _) in &unlocked_server.users {
                 buf_out.extend_from_slice(user.as_bytes());
                 buf_out.extend_from_slice(&[0x20]);
             }
@@ -99,21 +99,38 @@ fn handle_client(
 
         codes::client::JOIN_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
-            let params: Vec<&str> = p.split(' ').collect();
+            let params: Vec<&str> = p.split_whitespace().collect();
             let room = params.get(0).unwrap();
-            join_room(server, &nickname, room, stream)
+            join_room(server, &nickname, room, stream);
         }
 
         codes::client::LEAVE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
-            let params: Vec<&str> = p.split(' ').collect();
+            let params: Vec<&str> = p.split_whitespace().collect();
             let room = params.get(0).unwrap();
-            leave_room(server, &nickname, room, stream)
+            leave_room(server, &nickname, room, stream);
         }
 
         codes::client::SEND_MESSAGE => {
             #[cfg(debug_assertions)]
             println!("SEND_MESSAGE");
+        }
+
+        codes::client::SEND_MESSAGE_TO_ROOM => {
+            let p: String = String::from_utf8_lossy(param_bytes).to_string();
+            let params: Option<(&str, &str)> = p.split_once(" ");
+            match params {
+                Some((room, msg)) => {
+                    message(room, msg);
+                }
+                _ => {
+                    stream
+                        .write(&[codes::ERROR, codes::error::MALFORMED])
+                        .unwrap();
+                }
+            }
+            #[cfg(debug_assertions)]
+            println!("SEND_MESSAGE_TO_ROOM, {} ", p);
         }
         _ => {
             #[cfg(debug_assertions)]
@@ -127,15 +144,16 @@ fn handle_client(
 fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStream) {
     // Check for nickname collision
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-    if unlocked_server.users.contains(nickname) {
+    if unlocked_server.users.contains_key(nickname) {
         #[cfg(debug_assertions)]
         println!("Nickname Collision, {}", nickname);
         stream
             .write_all(&[codes::ERROR, codes::error::NICKNAME_COLLISION])
             .unwrap();
     } else {
+        let stream_clone = stream.try_clone().expect("failed to clone");
         // Add the user to the user list
-        unlocked_server.users.insert(nickname.to_string());
+        unlocked_server.users.insert(nickname.to_string(), stream_clone);
 
         // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]).unwrap();
@@ -147,6 +165,12 @@ fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut T
 
     match unlocked_server.rooms.get_mut(room) {
         Some(l) => {
+            for ele in l.into_iter() {
+                if ele == user{
+                    stream.write_all(&[codes::ERROR, codes::error::ALREADY_IN_ROOM]).unwrap();
+                    return;
+                }
+            }
             l.push(user.to_string());
         }
         None => {
@@ -184,7 +208,6 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
 
 pub fn start() {
     let listener: TcpListener = TcpListener::bind(SERVER_ADDRESS).expect("Failed to bind to port");
-    // let incoming: &std::net::Incoming = &listener.incoming();
     let server: Arc<Mutex<Server>> = Arc::new(Mutex::new(Server::new()));
     let server_outer: Arc<Mutex<Server>> = Arc::clone(&server);
     println!("Server listening on {}", SERVER_ADDRESS);
@@ -256,7 +279,9 @@ pub fn start() {
         let inp: String = input!(":");
         match inp.parse::<u8>() {
             Ok(num) => match num {
-                0 => {println!("Goodbye"); },
+                0 => {
+                    println!("Goodbye");
+                }
                 1 => println!("Users: {:?}", server.lock().unwrap().users),
                 2 => println!("Rooms: {:?}", server.lock().unwrap().rooms),
                 _ => println!("Invalid Input"),

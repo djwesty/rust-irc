@@ -23,5 +23,11 @@ pub mod codes {
         pub const SERVER_FULL: u8 = 0x12;
         pub const ALREADY_REGISTERED: u8 = 0x13;
         pub const NOT_YET_REGISTERED: u8 = 0x14;
+        pub const MALFORMED: u8 = 0x15;
+        pub const ALREADY_IN_ROOM: u8 = 0x16;
     }
+}
+
+pub fn clear() {
+    print!("\x1B[2J");
 }
