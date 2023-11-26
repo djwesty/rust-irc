@@ -27,10 +27,6 @@ impl Server {
     }
 }
 
-fn read_op() {}
-
-fn write_op() {}
-
 fn handle_client(
     server: &Arc<Mutex<Server>>,
     stream: &mut TcpStream,
@@ -40,53 +36,47 @@ fn handle_client(
     // handle user commands
     match cmd_bytes[0] {
         codes::client::REGISTER_NICK => {
-            #[cfg(debug_assertions)]
-            println!("REGISTER_NICK");
             let nickname: String = String::from_utf8_lossy(param_bytes).to_string();
             register_nick(server, nickname, stream);
         }
         codes::client::LIST_ROOMS => {
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-
-            #[cfg(debug_assertions)]
-            println!("LIST_ROOMS");
             let mut buf_out: Vec<u8> = Vec::new();
             buf_out.extend_from_slice(&[codes::RESPONSE]);
             for (room, user) in &unlocked_server.rooms {
                 buf_out.extend_from_slice(room.as_bytes());
+                buf_out.extend_from_slice(&[0x20]);
             }
             stream.write(&buf_out);
         }
 
         codes::client::LIST_USERS => {
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-
-            #[cfg(debug_assertions)]
-            println!("LIST_USERS");
             let mut buf_out: Vec<u8> = Vec::new();
             buf_out.extend_from_slice(&[codes::RESPONSE]);
             for (user) in &unlocked_server.users {
                 buf_out.extend_from_slice(user.as_bytes());
+                buf_out.extend_from_slice(&[0x20]);
             }
-            #[cfg(debug_assertions)]
-            println!("buf users list {:?}", buf_out);
             stream.write(&buf_out);
         }
-        codes::client::JOIN_ROOM => {
-            #[cfg(debug_assertions)]
-            println!("JOIN_ROOM ");
 
+        codes::client::JOIN_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
-        
             let params: Vec<&str> = p.split(' ').collect();
             let user = params.get(0).unwrap();
             let room = params.get(1).unwrap();
             join_room(server, *user, room, stream)
         }
+
         codes::client::LEAVE_ROOM => {
-            #[cfg(debug_assertions)]
-            println!("LEAVE_ROOM");
+            let p: String = String::from_utf8_lossy(param_bytes).to_string();
+            let params: Vec<&str> = p.split(' ').collect();
+            let user = params.get(0).unwrap();
+            let room = params.get(1).unwrap();
+            leave_room(server, user, room, stream)
         }
+        
         codes::client::SEND_MESSAGE => {
             #[cfg(debug_assertions)]
             println!("SEND_MESSAGE");
@@ -105,7 +95,7 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: String, stream: &mut Tcp
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     if unlocked_server.users.contains(&nickname) {
         #[cfg(debug_assertions)]
-        println!("nickname collision, {}", nickname);
+        println!("Nickname Collision, {}", nickname);
         stream.write_all(&[codes::ERROR, codes::error::NICKNAME_COLLISION]);
     } else {
         // Add the user to the user list
@@ -128,6 +118,27 @@ fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut T
             unlocked_server.rooms.insert(room.to_string(), list);
         }
     }
+    stream.write_all(&[codes::RESPONSE_OK]);
+}
+
+fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut TcpStream) {
+    let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+    match unlocked_server.rooms.get_mut(room) {
+        Some(l) => {
+            let before_len = l.len();
+            l.retain(|item| item != user);
+            if l.len() == 0 {
+                unlocked_server.rooms.remove(room);
+            } else if l.len() == before_len {
+                stream.write_all(&[codes::ERROR, codes::error::INVALID_ROOM]);
+            } else {
+                stream.write_all(&[codes::RESPONSE_OK]);
+            }
+        }
+        None => {
+            stream.write_all(&[codes::ERROR, codes::error::INVALID_ROOM]);
+        }
+    }
 }
 
 pub fn start() {
@@ -141,7 +152,7 @@ pub fn start() {
             match tcpstream {
                 Ok(mut stream) => {
                     let mut buf_in: [u8; 1024] = [0; 1024];
-                    let server_inner = Arc::clone(&server_outer);
+                    let server_inner: Arc<Mutex<Server>> = Arc::clone(&server_outer);
 
                     thread::spawn(move || loop {
                         match stream.read(&mut buf_in) {
@@ -152,14 +163,14 @@ pub fn start() {
                                 handle_client(&server_inner, &mut stream, cmd_bytes, param_bytes);
                             }
                             Err(_) => {
-                                println!("Error parsing client");
+                                eprintln!("Error parsing client");
                                 stream.write(&[codes::END]);
                                 break;
                             }
                         }
                     });
                 }
-                Err(e) => {
+                Err(_) => {
                     eprintln!("Error accepting connections!");
                 }
             }
