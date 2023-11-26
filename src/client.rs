@@ -4,6 +4,40 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::thread;
 
+fn no_param_op(opcode: u8, stream: &mut TcpStream) {
+    stream.write(&[opcode]).unwrap();
+}
+
+fn one_param_op(opcode: u8, stream: &mut TcpStream, param: &str) {
+    let size = param.to_string().capacity() + 1;
+    let mut out_buf: Vec<u8> = vec![0; size];
+    out_buf[0] = opcode;
+
+    for i in 1..param.len() + 1 {
+        out_buf[i] = *param.as_bytes().get(i - 1).unwrap();
+    }
+    stream.write(&out_buf).unwrap();
+}
+
+fn two_param_op(opcode: u8, stream: &mut TcpStream, param0: &str, param1: &str) {
+    let size = param0.to_string().capacity() + param1.to_string().capacity() + 2;
+    let mut out_buf: Vec<u8> = vec![0; size];
+    let mut byte: usize = 0;
+    out_buf[byte] = opcode;
+    byte += 1;
+    for i in 0..param0.len() {
+        out_buf[byte] = *param0.as_bytes().get(i).unwrap();
+        byte += 1;
+    }
+    out_buf[byte] = 0x20;
+    byte += 1;
+    for i in 0..param1.len() {
+        out_buf[byte] = *param1.as_bytes().get(i).unwrap();
+        byte += 1;
+    }
+    stream.write(&out_buf).unwrap();
+}
+
 fn read_messages(mut stream: TcpStream) {
     let mut buffer: [u8; 1024] = [0; 1024];
     loop {
@@ -64,66 +98,7 @@ fn process_message(msg_bytes: &[u8]) {
 
 fn disconnect() {}
 
-fn rooms(stream: &mut TcpStream) {
-    stream.write(&[codes::client::LIST_ROOMS]);
-}
-fn users(stream: &mut TcpStream) {
-    stream.write(&[codes::client::LIST_USERS]);
-}
-
-fn msg(stream: &mut TcpStream) {}
-
-fn join(nick: &str, room: &str, stream: &mut TcpStream) {
-    let size = room.to_string().capacity() + nick.to_string().capacity() + 2;
-    let mut out_buf: Vec<u8> = vec![0; size];
-    let mut byte: usize = 0;
-    out_buf[byte] = codes::client::JOIN_ROOM;
-    byte += 1;
-    for i in 0..nick.len() {
-        out_buf[byte] = *nick.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
-    out_buf[byte] = 0x20;
-    byte += 1;
-    for i in 0..room.len() {
-        out_buf[byte] = *room.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
-    stream.write(&out_buf);
-}
-
 fn show(stream: &mut TcpStream) {}
-
-fn leave(nick: &str, room: &str, stream: &mut TcpStream) {
-    let size = room.to_string().capacity() + nick.to_string().capacity() + 2;
-    let mut out_buf: Vec<u8> = vec![0; size];
-    let mut byte: usize = 0;
-    out_buf[byte] = codes::client::LEAVE_ROOM;
-    byte += 1;
-    for i in 0..nick.len() {
-        out_buf[byte] = *nick.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
-    out_buf[byte] = 0x20;
-    byte += 1;
-    for i in 0..room.len() {
-        out_buf[byte] = *room.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
-    stream.write(&out_buf);
-}
-
-fn list( room: &str, stream: &mut TcpStream) {
-    let size = room.to_string().capacity() +1;
-    let mut out_buf: Vec<u8> = vec![0; size];
-    out_buf[0] = codes::client::LIST_USERS_IN_ROOM;
-
-
-    for i in 1..room.len()+1 {
-        out_buf[i] = *room.as_bytes().get(i-1).unwrap();
-    }
-    stream.write(&out_buf);
-}
 
 pub fn start() {
     println!("Starting the IRC client. No spaces allowed in nicknames or room names");
@@ -155,32 +130,42 @@ pub fn start() {
         for i in 1..nick.len() + 1 {
             buf[i] = *nick.as_bytes().get(i - 1).unwrap();
         }
-        stream.write(&buf);
+        stream.write(&buf).unwrap();
 
         loop {
             let inp: String = input!(":");
             let cmds: Vec<_> = inp.split(" ").collect();
             match *cmds.get(0).unwrap() {
                 "/quit" => disconnect(),
-                "/rooms" => rooms(&mut stream),
-                "/users" => users(&mut stream),
+                "/rooms" => no_param_op(codes::client::LIST_ROOMS, &mut stream),
+                "/users" => no_param_op(codes::client::LIST_USERS, &mut stream),
                 "/list" => {
                     let room = *cmds.get(1).unwrap();
-                    list(room, &mut stream);
-
+                    one_param_op(codes::client::LIST_USERS_IN_ROOM, &mut stream, room);
                 }
                 "/join" => {
                     let room = *cmds.get(1).unwrap();
-                    join(&nick, room, &mut stream)
+                    one_param_op(codes::client::JOIN_ROOM, &mut stream, room);
                 }
                 "/show" => show(&mut stream),
                 "/leave" => {
-                    let room = *cmds.get(1).unwrap();
-                    leave(&nick, room, &mut stream)
+                    let room: &str = *cmds.get(1).unwrap();
+                    one_param_op(codes::client::LEAVE_ROOM, &mut stream, room);
                 }
-                "/msg" => msg(&mut stream),
+                "/msg" => {
+                    let room: &str = *cmds.get(1).unwrap();
+                    // let message = *cmds.
+                    // two_param_op(
+                    //     codes::client::SEND_MESSAGE_TO_ROOM,
+                    //     &mut stream,
+                    //     param0,
+                    //     param1,
+                    // )
+                }
 
-                _ => msg(&mut stream),
+                _ => {
+                    println!("Not implemented");
+                }
             }
         }
     } else {
