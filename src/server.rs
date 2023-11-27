@@ -159,8 +159,8 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
             .unwrap();
     } else {
         // Add the user to the user list
-        
-        unlocked_server.users.insert(nickname.to_string(),  stream);
+        let clone = stream.try_clone().expect("fail to clone");
+        unlocked_server.users.insert(nickname.to_string(),  clone);
 
         // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]).unwrap();
