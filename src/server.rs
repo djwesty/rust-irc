@@ -13,12 +13,12 @@ const SERVER_ADDRESS: &str = "0.0.0.0:6667";
 const MAX_USERS: usize = 20;
 
 #[derive(Debug)]
-struct Server<'a> {
-    users: HashMap<String, &'a mut TcpStream>,
+struct Server {
+    users: HashMap<String, TcpStream>,
     rooms: HashMap<String, Vec<String>>,
 }
 
-impl<'a> Server<'a> {
+impl Server {
     fn new() -> Self {
         Server {
             users: HashMap::new(),
@@ -41,13 +41,11 @@ fn broadcast(op: u8, server: &Arc<Mutex<Server>>, message: &str) {
     }
 
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-    let streams: std::collections::hash_map::ValuesMut<'_, String, &mut TcpStream> =
-        unlocked_server.users.values_mut();
+    let streams = unlocked_server.users.values_mut();
     for stream in streams {
         stream.write_all(&out_buf);
     }
 }
-
 
 fn handle_client(
     server: &Arc<Mutex<Server>>,
@@ -161,8 +159,8 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
             .unwrap();
     } else {
         // Add the user to the user list
-        let cl: TcpStream = stream.try_clone().expect("fail to clone");
-        // unlocked_server.users.insert(nickname.to_string(),  cloned_stream);
+        
+        unlocked_server.users.insert(nickname.to_string(),  stream);
 
         // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]).unwrap();
