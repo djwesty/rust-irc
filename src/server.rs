@@ -13,12 +13,12 @@ const SERVER_ADDRESS: &str = "0.0.0.0:6667";
 const MAX_USERS: usize = 20;
 
 #[derive(Debug)]
-struct Server {
-    users: HashMap<String, TcpStream>,
+struct Server<'a> {
+    users: HashMap<String, &'a mut TcpStream>,
     rooms: HashMap<String, Vec<String>>,
 }
 
-impl Server {
+impl<'a> Server<'a> {
     fn new() -> Self {
         Server {
             users: HashMap::new(),
@@ -27,18 +27,27 @@ impl Server {
     }
 }
 
-fn message(room: &str, message: &str) {}
+fn message_room(room: &str, message: &str) {}
 
-fn send_all(op: u8, listener: TcpListener) {
-    for tcpstream in listener.incoming() {
-        match tcpstream {
-            Ok(mut stream) => {
-                stream.write_all(&[op]).unwrap();
-            }
-            Err(_) => {}
-        }
+fn message_user(user: &str, message: &str) {}
+
+fn broadcast(op: u8, server: &Arc<Mutex<Server>>, message: &str) {
+    let size = message.len() + 1;
+    let mut out_buf: Vec<u8> = vec![0; size];
+    out_buf[0] = op;
+
+    for i in 1..size {
+        out_buf[i] = *message.as_bytes().get(i - 1).unwrap();
+    }
+
+    let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+    let streams: std::collections::hash_map::ValuesMut<'_, String, &mut TcpStream> =
+        unlocked_server.users.values_mut();
+    for stream in streams {
+        stream.write_all(&out_buf);
     }
 }
+
 
 fn handle_client(
     server: &Arc<Mutex<Server>>,
@@ -111,17 +120,17 @@ fn handle_client(
             leave_room(server, &nickname, room, stream);
         }
 
-        codes::client::SEND_MESSAGE => {
+        codes::client::MESSAGE => {
             #[cfg(debug_assertions)]
-            println!("SEND_MESSAGE");
+            println!("MESSAGE");
         }
 
-        codes::client::SEND_MESSAGE_TO_ROOM => {
+        codes::client::MESSAGE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Option<(&str, &str)> = p.split_once(" ");
             match params {
                 Some((room, msg)) => {
-                    message(room, msg);
+                    // message(room, msg);
                 }
                 _ => {
                     stream
@@ -130,7 +139,7 @@ fn handle_client(
                 }
             }
             #[cfg(debug_assertions)]
-            println!("SEND_MESSAGE_TO_ROOM, {} ", p);
+            println!("MESSAGE_ROOM, {} ", p);
         }
         _ => {
             #[cfg(debug_assertions)]
@@ -151,9 +160,9 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
             .write_all(&[codes::ERROR, codes::error::NICKNAME_COLLISION])
             .unwrap();
     } else {
-        let stream_clone = stream.try_clone().expect("failed to clone");
         // Add the user to the user list
-        unlocked_server.users.insert(nickname.to_string(), stream_clone);
+        let cl: TcpStream = stream.try_clone().expect("fail to clone");
+        // unlocked_server.users.insert(nickname.to_string(),  cloned_stream);
 
         // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]).unwrap();
@@ -166,8 +175,10 @@ fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut T
     match unlocked_server.rooms.get_mut(room) {
         Some(l) => {
             for ele in l.into_iter() {
-                if ele == user{
-                    stream.write_all(&[codes::ERROR, codes::error::ALREADY_IN_ROOM]).unwrap();
+                if ele == user {
+                    stream
+                        .write_all(&[codes::ERROR, codes::error::ALREADY_IN_ROOM])
+                        .unwrap();
                     return;
                 }
             }
@@ -244,7 +255,7 @@ pub fn start() {
                                             }
                                             Err(_) => {
                                                 eprintln!("Error parsing client");
-                                                stream.write(&[codes::END]).unwrap();
+                                                stream.write(&[codes::QUIT]).unwrap();
                                                 break;
                                             }
                                         }
@@ -260,7 +271,7 @@ pub fn start() {
                             }
                             Err(_) => {
                                 eprintln!("Error parsing client");
-                                stream.write(&[codes::END]).unwrap();
+                                stream.write(&[codes::QUIT]).unwrap();
                             }
                         }
                     });
@@ -276,6 +287,7 @@ pub fn start() {
         println!("0: Quit Server");
         println!("1: list connected users");
         println!("2: list rooms");
+        println!("3: Broadcast message to all");
         let inp: String = input!(":");
         match inp.parse::<u8>() {
             Ok(num) => match num {
@@ -284,6 +296,10 @@ pub fn start() {
                 }
                 1 => println!("Users: {:?}", server.lock().unwrap().users),
                 2 => println!("Rooms: {:?}", server.lock().unwrap().rooms),
+                3 => {
+                    let inp = input!("Enter message: ");
+                    broadcast(codes::client::MESSAGE, &server, &inp)
+                }
                 _ => println!("Invalid Input"),
             },
             Err(_) => {

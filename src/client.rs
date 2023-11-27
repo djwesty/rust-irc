@@ -81,6 +81,23 @@ fn process_message(msg_bytes: &[u8]) {
                 }
             }
         }
+
+        codes::client::MESSAGE => {
+            let message = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
+            println!("{}", message);
+        }
+        codes::client::MESSAGE_ROOM => {
+            let params = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
+            match params.split_once(" ") {
+                Some((room, msg)) => {
+                    println!("{}: {}", room, msg);
+                }
+                _ => {
+                    println!("Malformed message recieved");
+                }
+            }
+        }
+
         codes::RESPONSE_OK => {
             #[cfg(debug_assertions)]
             println!("RESPONSE_OK");
@@ -185,12 +202,7 @@ pub fn start() {
                         },
                         "/msg" => match inp.split_once(" ") {
                             Some((room, msg)) => {
-                                two_param_op(
-                                    codes::client::SEND_MESSAGE_TO_ROOM,
-                                    &mut stream,
-                                    room,
-                                    msg,
-                                );
+                                two_param_op(codes::client::MESSAGE_ROOM, &mut stream, room, msg);
                             }
                             None => {
                                 println!("Usage: /msg [room] [message]");
@@ -208,7 +220,7 @@ pub fn start() {
                             } else {
                                 let message: String = inp;
                                 two_param_op(
-                                    codes::client::SEND_MESSAGE_TO_ROOM,
+                                    codes::client::MESSAGE_ROOM,
                                     &mut stream,
                                     &active_room,
                                     &message,
