@@ -89,9 +89,12 @@ fn process_message(msg_bytes: &[u8]) {
         codes::client::MESSAGE_ROOM => {
             let params = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
             match params.split_once(" ") {
-                Some((room, msg)) => {
-                    println!("{}: {}", room, msg);
-                }
+                Some((room, remainder)) => match remainder.split_once(" ") {
+                    Some((user, msg)) => {
+                        println!("[{}]:[{}]: {}", room, user, msg);
+                    }
+                    None => {}
+                },
                 _ => {
                     println!("Malformed message recieved");
                 }

@@ -1,3 +1,4 @@
+use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
 use std::{
     collections::HashMap,
@@ -29,7 +30,62 @@ impl Server {
 
 fn message_room(room: &str, message: &str) {}
 
-fn message_user(user: &str, message: &str) {}
+fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
+    println!("message fn {} {}", room, msg);
+    let size = room.len() + msg.len() + sender.len() + 3;
+    let mut out_buf: Vec<u8> = vec![0; size];
+
+    let mut byte: usize = 0;
+    out_buf[byte] = codes::client::MESSAGE_ROOM;
+    byte += 1;
+
+    for i in 0..room.len() {
+        out_buf[byte] = *room.as_bytes().get(i).unwrap();
+        byte += 1;
+    }
+
+    out_buf[byte] = 0x20;
+    byte += 1;
+
+    for i in 0..sender.len() {
+        out_buf[byte] = *sender.as_bytes().get(i).unwrap();
+        byte += 1;
+    }
+
+    out_buf[byte] = 0x20;
+    byte += 1;
+
+    for i in 0..msg.len() {
+        out_buf[byte] = *msg.as_bytes().get(i).unwrap();
+        byte += 1;
+    }
+
+    let mut guard = server.lock().unwrap();
+    let server: &mut Server = guard.deref_mut();
+
+    let room_users: Option<&Vec<String>> = server.rooms.get(room);
+    match room_users {
+        Some(users) => {
+            for user in users {
+                let stream: Option<&mut TcpStream> = server.users.get_mut(user);
+                match stream {
+                    Some(str) => {
+                        println!("the buf {:?}, ", out_buf);
+                        str.write_all(&out_buf).unwrap();
+                    }
+                    None => {
+                        eprintln!("Error: Invalid message from client");
+                        
+                    }
+                }
+            }
+        }
+        None => {
+            eprintln!("Error: Invalid message from client");
+
+        }
+    }
+}
 
 fn broadcast(op: u8, server: &Arc<Mutex<Server>>, message: &str) {
     let size = message.len() + 1;
@@ -125,10 +181,12 @@ fn handle_client(
 
         codes::client::MESSAGE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
+            #[cfg(debug_assertions)]
+            println!("MESSAGE_ROOM, {:?} ", p);
             let params: Option<(&str, &str)> = p.split_once(" ");
             match params {
                 Some((room, msg)) => {
-                    // message(room, msg);
+                    message(room, msg, nickname, server);
                 }
                 _ => {
                     stream
@@ -136,8 +194,6 @@ fn handle_client(
                         .unwrap();
                 }
             }
-            #[cfg(debug_assertions)]
-            println!("MESSAGE_ROOM, {} ", p);
         }
         _ => {
             #[cfg(debug_assertions)]
@@ -160,7 +216,7 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
     } else {
         // Add the user to the user list
         let clone = stream.try_clone().expect("fail to clone");
-        unlocked_server.users.insert(nickname.to_string(),  clone);
+        unlocked_server.users.insert(nickname.to_string(), clone);
 
         // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]).unwrap();
