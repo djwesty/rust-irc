@@ -8,7 +8,7 @@ use std::{
 };
 
 use prompted::input;
-use rust_irc::codes;
+use rust_irc::{codes, clear};
 
 const SERVER_ADDRESS: &str = "0.0.0.0:6667";
 const MAX_USERS: usize = 20;
@@ -28,7 +28,6 @@ impl Server {
     }
 }
 
-fn message_room(room: &str, message: &str) {}
 
 fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
     println!("message fn {} {}", room, msg);
@@ -70,7 +69,6 @@ fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
                 let stream: Option<&mut TcpStream> = server.users.get_mut(user);
                 match stream {
                     Some(str) => {
-                        println!("the buf {:?}, ", out_buf);
                         str.write_all(&out_buf).unwrap();
                     }
                     None => {
@@ -99,7 +97,7 @@ fn broadcast(op: u8, server: &Arc<Mutex<Server>>, message: &str) {
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let streams = unlocked_server.users.values_mut();
     for stream in streams {
-        stream.write_all(&out_buf);
+        stream.write_all(&out_buf).unwrap();
     }
 }
 
@@ -275,6 +273,7 @@ pub fn start() {
     let listener: TcpListener = TcpListener::bind(SERVER_ADDRESS).expect("Failed to bind to port");
     let server: Arc<Mutex<Server>> = Arc::new(Mutex::new(Server::new()));
     let server_outer: Arc<Mutex<Server>> = Arc::clone(&server);
+    clear();
     println!("Server listening on {}", SERVER_ADDRESS);
 
     thread::spawn(move || {

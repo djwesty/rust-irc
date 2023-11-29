@@ -1,8 +1,10 @@
 use prompted::input;
-use rust_irc::codes;
+use rust_irc::{codes, clear};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::thread;
+
+use crate::client;
 
 fn no_param_op(opcode: u8, stream: &mut TcpStream) {
     stream.write(&[opcode]).unwrap();
@@ -38,7 +40,7 @@ fn two_param_op(opcode: u8, stream: &mut TcpStream, param0: &str, param1: &str) 
     stream.write(&out_buf).unwrap();
 }
 
-fn read_messages(mut stream: TcpStream) {
+fn read_messages(mut stream: TcpStream, nick: &str) {
     let mut buffer: [u8; 1024] = [0; 1024];
     loop {
         match stream.read(&mut buffer) {
@@ -47,7 +49,7 @@ fn read_messages(mut stream: TcpStream) {
                     break; //Server closed connection
                 }
                 let msg_bytes: &[u8] = &buffer[..size];
-                process_message(msg_bytes);
+                process_message(msg_bytes, nick);
             }
             Err(_) => {
                 break;
@@ -56,11 +58,10 @@ fn read_messages(mut stream: TcpStream) {
     }
 }
 
-fn process_message(msg_bytes: &[u8]) {
+fn process_message(msg_bytes: &[u8], nick: &str) {
     match msg_bytes[0] {
         codes::ERROR =>
         {
-            #[cfg(debug_assertions)]
             match msg_bytes[1] {
                 codes::error::INVALID_ROOM => {
                     println!("Operation Performed on an invalid room. Try again");
@@ -76,8 +77,7 @@ fn process_message(msg_bytes: &[u8]) {
                     disconnect();
                 }
                 _ => {
-                    #[cfg(debug_assertions)]
-                    println!("Unknown error code {:x?}", msg_bytes[1]);
+                    println!("Error code: {:x?}", msg_bytes[1]);
                 }
             }
         }
@@ -91,19 +91,23 @@ fn process_message(msg_bytes: &[u8]) {
             match params.split_once(" ") {
                 Some((room, remainder)) => match remainder.split_once(" ") {
                     Some((user, msg)) => {
-                        println!("[{}]:[{}]: {}", room, user, msg);
+                        if user != nick {
+                            println!("[{}]:[{}]: {}", room, user, msg);
+                        }
                     }
-                    None => {}
+                    None => {
+                        eprintln!("Malformed message recieved");
+                    }
                 },
-                _ => {
-                    println!("Malformed message recieved");
+                None => {
+                    eprintln!("Malformed message recieved");
                 }
             }
         }
 
         codes::RESPONSE_OK => {
-            #[cfg(debug_assertions)]
-            println!("RESPONSE_OK");
+            // #[cfg(debug_assertions)]
+            // println!("RESPONSE_OK");
         }
         codes::RESPONSE => {
             let message = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
@@ -119,6 +123,7 @@ fn process_message(msg_bytes: &[u8]) {
 fn disconnect() {}
 
 fn help() {
+    clear();
     println!("Available commands:");
     println!("/quit <- Disconnect and stop the client");
     println!("/rooms <- List all of the rooms on the server");
@@ -132,13 +137,18 @@ fn help() {
 }
 
 pub fn start() {
-    println!("Starting the IRC client. No spaces allowed in nicknames or room names");
+    clear();
+    println!("Starting the IRC client. No spaces allowed in nicknames or room names. /help to see available commands");
     let mut nick: String;
     let mut active_room: String = String::new();
     loop {
         nick = input!("Enter your nickname : ");
         if nick.contains(" ") {
-            println!("May not contain spaces. Try again");
+            println!("May not contain spaces . Try again");
+
+        }
+        else if nick.is_empty() {
+            println!("May not be empty . Try again");
         } else {
             break;
         }
@@ -152,15 +162,16 @@ pub fn start() {
 
         //another stream for reading messages
         let stream_clone: TcpStream = stream.try_clone().expect("Failed to clone stream");
+        let nick_clone = nick.clone();
         thread::spawn(move || {
-            read_messages(stream_clone);
+            read_messages(stream_clone, &nick_clone);
         });
 
         //try to register the nickname
         one_param_op(codes::client::REGISTER_NICK, &mut stream, &nick);
 
         loop {
-            let inp: String = input!(":");
+            let inp: String = input!("\n[{}]:",active_room);
             let mut args: std::str::SplitWhitespace<'_> = inp.split_whitespace();
             let command: Option<&str> = args.next();
 
@@ -189,6 +200,7 @@ pub fn start() {
                         },
                         "/show" => match param {
                             Some(room) => {
+                                clear();
                                 active_room = room.to_string();
                             }
                             None => {
