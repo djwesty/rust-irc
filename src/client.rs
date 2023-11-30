@@ -64,16 +64,19 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
     match msg_bytes[0] {
         codes::ERROR => match msg_bytes[1] {
             codes::error::INVALID_ROOM => {
-                println!("Operation Performed on an invalid room. Try again");
+                eprintln!("Operation Performed on an invalid room. Try again");
             }
             codes::error::NICKNAME_COLLISION => {
-                println!("Nickname already in use on server. Connect again with a different one");
+                eprintln!("Nickname already in use on server. Connect again with a different one");
             }
             codes::error::SERVER_FULL => {
-                println!("Server is full. Try again later");
+                eprintln!("Server is full. Try again later");
+            }
+            codes::error::NOT_IN_ROOM => {
+                eprintln!("Cannot send a message before joining room. Use /join [room].")
             }
             _ => {
-                println!("Error code: {:x?}", msg_bytes[1]);
+                eprintln!("Error code: {:x?}", msg_bytes[1]);
             }
         },
 
@@ -171,7 +174,12 @@ pub fn start() {
         one_param_op(codes::client::REGISTER_NICK, &mut stream, &nick);
 
         loop {
-            let inp: String = input!("\n[{}]:", active_room);
+            let mut inp = String::new();
+            if active_room.is_empty() {
+                inp = input!("");
+            } else {
+                inp = input!("\n[{}]:", active_room);
+            }
             let mut args: std::str::SplitWhitespace<'_> = inp.split_whitespace();
             let command: Option<&str> = args.next();
 

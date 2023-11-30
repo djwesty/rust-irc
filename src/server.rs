@@ -84,7 +84,7 @@ fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
 }
 
 fn broadcast(op: u8, server: &Arc<Mutex<Server>>, message: &str) {
-    let size = message.len() + 1;
+    let size: usize = message.len() + 1;
     let mut out_buf: Vec<u8> = vec![0; size];
     out_buf[0] = op;
 
@@ -191,7 +191,29 @@ fn handle_client(
             let params: Option<(&str, &str)> = p.split_once(" ");
             match params {
                 Some((room, msg)) => {
-                    message(room, msg, nickname, server);
+                    let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+                    let users_in_room: Option<&Vec<String>> = unlocked_server.rooms.get(room);
+                    match users_in_room {
+                        Some(users) => {
+                            let is_user_in_room: Option<&String> =
+                                users.iter().find(|&u| u.eq(nickname));
+                            match is_user_in_room {
+                                Some(_) => {
+                                    message(room, msg, nickname, server);
+                                }
+                                None => {
+                                    stream
+                                        .write_all(&[codes::ERROR, codes::error::NOT_IN_ROOM])
+                                        .unwrap();
+                                }
+                            }
+                        }
+                        None => {
+                            stream
+                                .write_all(&[codes::ERROR, codes::error::INVALID_ROOM])
+                                .unwrap();
+                        }
+                    }
                 }
                 _ => {
                     stream
@@ -217,7 +239,7 @@ fn remove_user(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStre
     let server: &mut Server = guard.deref_mut();
     let mut rooms: &mut HashMap<String, Vec<String>> = &mut server.rooms;
     rooms.values_mut().for_each(|room: &mut Vec<String>| {
-        room.retain(|u| !u.eq(nickname));
+        room.retain(|u: &String| !u.eq(nickname));
     });
     let users: &mut HashMap<String, TcpStream> = &mut server.users;
     users.remove(nickname);
@@ -234,8 +256,8 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
             .unwrap();
     } else {
         // Add the user to the user list
-        let clone = stream.try_clone().expect("fail to clone");
-        let addr = clone.peer_addr().unwrap().to_string();
+        let clone: TcpStream = stream.try_clone().expect("fail to clone");
+        let addr: String = clone.peer_addr().unwrap().to_string();
 
         unlocked_server.users.insert(nickname.to_string(), clone);
         // Send response ok
@@ -391,8 +413,8 @@ pub fn start() {
                 1 => println!("Users: {:?}", server.lock().unwrap().users),
                 2 => println!("Rooms: {:?}", server.lock().unwrap().rooms),
                 3 => {
-                    let inp = input!("Enter message: ");
-                    broadcast(codes::client::MESSAGE, &server, &inp)
+                    let inp2 = input!("Enter message: ");
+                    broadcast(codes::client::MESSAGE, &server, &inp2);
                 }
                 _ => println!("Invalid Input"),
             },
