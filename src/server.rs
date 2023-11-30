@@ -8,7 +8,7 @@ use std::{
 };
 
 use prompted::input;
-use rust_irc::{codes, clear};
+use rust_irc::{clear, codes};
 
 const SERVER_ADDRESS: &str = "0.0.0.0:6667";
 const MAX_USERS: usize = 20;
@@ -27,7 +27,6 @@ impl Server {
         }
     }
 }
-
 
 fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
     let size = room.len() + msg.len() + sender.len() + 3;
@@ -71,15 +70,15 @@ fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
                         str.write_all(&out_buf).unwrap();
                     }
                     None => {
+                        //TODO send error msg to sender
                         eprintln!("Error: Invalid message from client");
-                        
                     }
                 }
             }
         }
         None => {
+            //TODO send error msg to sender
             eprintln!("Error: Invalid message from client");
-
         }
     }
 }
@@ -94,20 +93,21 @@ fn broadcast(op: u8, server: &Arc<Mutex<Server>>, message: &str) {
     }
 
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-    let streams: std::collections::hash_map::ValuesMut<'_, String, TcpStream> = unlocked_server.users.values_mut();
+    let streams: std::collections::hash_map::ValuesMut<'_, String, TcpStream> =
+        unlocked_server.users.values_mut();
     for stream in streams {
         stream.write_all(&out_buf).unwrap();
     }
 }
 
-fn disconnect_all(server: &Arc<Mutex<Server>>,) {
+fn disconnect_all(server: &Arc<Mutex<Server>>) {
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-    let users: std::collections::hash_map::ValuesMut<'_, String, TcpStream> = guard.users.values_mut();
-    users.for_each(|user: &mut TcpStream|  {
+    let users: std::collections::hash_map::ValuesMut<'_, String, TcpStream> =
+        guard.users.values_mut();
+    users.for_each(|user: &mut TcpStream| {
         user.write(&[codes::QUIT]).unwrap();
-        user.shutdown(std::net::Shutdown::Both);
+        user.shutdown(std::net::Shutdown::Both).unwrap();
     })
-
 }
 
 fn handle_client(
@@ -188,8 +188,6 @@ fn handle_client(
 
         codes::client::MESSAGE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
-            #[cfg(debug_assertions)]
-            println!("MESSAGE_ROOM, {:?} ", p);
             let params: Option<(&str, &str)> = p.split_once(" ");
             match params {
                 Some((room, msg)) => {
@@ -203,7 +201,7 @@ fn handle_client(
             }
         }
         codes::QUIT => {
-            remove_user(server, nickname,stream);
+            remove_user(server, nickname, stream);
         }
         _ => {
             #[cfg(debug_assertions)]
@@ -221,9 +219,8 @@ fn remove_user(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStre
     rooms.values_mut().for_each(|room: &mut Vec<String>| {
         room.retain(|u| !u.eq(nickname));
     });
-    let  users: &mut HashMap<String, TcpStream> = &mut server.users;
+    let users: &mut HashMap<String, TcpStream> = &mut server.users;
     users.remove(nickname);
-    
 }
 
 fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStream) {
@@ -243,7 +240,7 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
         unlocked_server.users.insert(nickname.to_string(), clone);
         // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]).unwrap();
-        
+
         println!("{} has registered nickname {}", addr, nickname);
     }
 }
@@ -275,8 +272,8 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     match unlocked_server.rooms.get_mut(room) {
         Some(l) => {
-            let before_len = l.len();
-            l.retain(|item| item != user);
+            let before_len: usize = l.len();
+            l.retain(|item: &String| item != user);
             if l.len() == 0 {
                 unlocked_server.rooms.remove(room);
                 stream.write_all(&[codes::RESPONSE_OK]).unwrap();
@@ -312,10 +309,16 @@ pub fn start() {
 
                     thread::spawn(move || {
                         let nickname: String;
-                        println!("IP {} has connected", stream.peer_addr().unwrap().to_string());
+                        println!(
+                            "IP {} has connected",
+                            stream.peer_addr().unwrap().to_string()
+                        );
                         match stream.read(&mut buf_in) {
                             Ok(0) => {
-                                println!("IP {} has closed the connection", stream.peer_addr().unwrap().to_string());
+                                println!(
+                                    "IP {} has closed the connection",
+                                    stream.peer_addr().unwrap().to_string()
+                                );
                             }
                             Ok(size) => {
                                 let cmd_bytes: &[u8] = &buf_in[0..1];
@@ -326,7 +329,8 @@ pub fn start() {
                                     loop {
                                         match stream.read(&mut buf_in) {
                                             Ok(0) => {
-                                                println!("IP {} wit nickname {} has closed the connection", stream.peer_addr().unwrap().to_string(), nickname);
+                                                println!("IP {} with nickname {} has closed the connection", stream.peer_addr().unwrap().to_string(), nickname);
+                                                remove_user(&server_inner, &nickname, &mut stream);
                                                 break;
                                             }
                                             Ok(size) => {
@@ -383,7 +387,6 @@ pub fn start() {
                     println!("Stopping Server");
                     disconnect_all(&server);
                     break;
-
                 }
                 1 => println!("Users: {:?}", server.lock().unwrap().users),
                 2 => println!("Rooms: {:?}", server.lock().unwrap().rooms),

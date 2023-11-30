@@ -1,5 +1,5 @@
 use prompted::input;
-use rust_irc::{codes, clear};
+use rust_irc::{clear, codes};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::thread;
@@ -11,7 +11,7 @@ fn no_param_op(opcode: u8, stream: &mut TcpStream) {
 }
 
 fn one_param_op(opcode: u8, stream: &mut TcpStream, param: &str) {
-    let size = param.to_string().capacity() + 1;
+    let size: usize = param.to_string().capacity() + 1;
     let mut out_buf: Vec<u8> = vec![0; size];
     out_buf[0] = opcode;
 
@@ -22,7 +22,7 @@ fn one_param_op(opcode: u8, stream: &mut TcpStream, param: &str) {
 }
 
 fn two_param_op(opcode: u8, stream: &mut TcpStream, param0: &str, param1: &str) {
-    let size = param0.to_string().capacity() + param1.to_string().capacity() + 2;
+    let size: usize = param0.to_string().capacity() + param1.to_string().capacity() + 2;
     let mut out_buf: Vec<u8> = vec![0; size];
     let mut byte: usize = 0;
     out_buf[byte] = opcode;
@@ -44,10 +44,11 @@ fn read_messages(mut stream: TcpStream, nick: &str) {
     let mut buffer: [u8; 1024] = [0; 1024];
     loop {
         match stream.read(&mut buffer) {
+            Ok(0) => {
+                println!("Server closed the connection. Shutting down client");
+                std::process::exit(0);
+            }
             Ok(size) => {
-                if size == 0 {
-                    break; //Server closed connection
-                }
                 let msg_bytes: &[u8] = &buffer[..size];
                 process_message(msg_bytes, nick);
             }
@@ -61,29 +62,24 @@ fn read_messages(mut stream: TcpStream, nick: &str) {
 fn process_message(msg_bytes: &[u8], nick: &str) {
     println!();
     match msg_bytes[0] {
-        codes::ERROR =>
-        {
-            match msg_bytes[1] {
-                codes::error::INVALID_ROOM => {
-                    println!("Operation Performed on an invalid room. Try again");
-                }
-                codes::error::NICKNAME_COLLISION => {
-                    println!(
-                        "Nickname already in use on server. Connect again with a different one"
-                    );
-                }
-                codes::error::SERVER_FULL => {
-                    println!("Server is full. Try again later");
-                }
-                _ => {
-                    println!("Error code: {:x?}", msg_bytes[1]);
-                }
+        codes::ERROR => match msg_bytes[1] {
+            codes::error::INVALID_ROOM => {
+                println!("Operation Performed on an invalid room. Try again");
             }
-        }
+            codes::error::NICKNAME_COLLISION => {
+                println!("Nickname already in use on server. Connect again with a different one");
+            }
+            codes::error::SERVER_FULL => {
+                println!("Server is full. Try again later");
+            }
+            _ => {
+                println!("Error code: {:x?}", msg_bytes[1]);
+            }
+        },
 
         codes::client::MESSAGE => {
             let message = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
-            println!("{}", message);
+            println!("[server]:{}", message);
         }
         codes::client::MESSAGE_ROOM => {
             let params = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
@@ -151,9 +147,7 @@ pub fn start() {
         nick = input!("Enter your nickname : ");
         if nick.contains(" ") {
             println!("May not contain spaces . Try again");
-
-        }
-        else if nick.is_empty() {
+        } else if nick.is_empty() {
             println!("May not be empty . Try again");
         } else {
             break;
@@ -168,7 +162,7 @@ pub fn start() {
 
         //another stream for reading messages
         let stream_clone: TcpStream = stream.try_clone().expect("Failed to clone stream");
-        let nick_clone = nick.clone();
+        let nick_clone: String = nick.clone();
         thread::spawn(move || {
             read_messages(stream_clone, &nick_clone);
         });
@@ -177,7 +171,7 @@ pub fn start() {
         one_param_op(codes::client::REGISTER_NICK, &mut stream, &nick);
 
         loop {
-            let inp: String = input!("\n[{}]:",active_room);
+            let inp: String = input!("\n[{}]:", active_room);
             let mut args: std::str::SplitWhitespace<'_> = inp.split_whitespace();
             let command: Option<&str> = args.next();
 
@@ -185,7 +179,10 @@ pub fn start() {
                 Some(cmd) => {
                     let param: Option<&str> = args.next();
                     match cmd {
-                        "/quit" => {disconnect(&mut stream); break},
+                        "/quit" => {
+                            disconnect(&mut stream);
+                            break;
+                        }
                         "/rooms" => no_param_op(codes::client::LIST_ROOMS, &mut stream),
                         "/users" => no_param_op(codes::client::LIST_USERS, &mut stream),
                         "/list" => match param {
