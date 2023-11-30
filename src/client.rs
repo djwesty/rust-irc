@@ -2,9 +2,9 @@ use prompted::input;
 use rust_irc::{clear, codes};
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::sync::{Arc, Mutex};
 use std::thread;
-
-use crate::client;
+use std::time::{Duration, Instant};
 
 fn no_param_op(opcode: u8, stream: &mut TcpStream) {
     stream.write(&[opcode]).unwrap();
@@ -40,7 +40,7 @@ fn two_param_op(opcode: u8, stream: &mut TcpStream, param0: &str, param1: &str) 
     stream.write(&out_buf).unwrap();
 }
 
-fn read_messages(mut stream: TcpStream, nick: &str) {
+fn read_messages(mut stream: TcpStream, nick: &str, timestamp: &mut Arc<Mutex<Instant>>) {
     let mut buffer: [u8; 1024] = [0; 1024];
     loop {
         match stream.read(&mut buffer) {
@@ -49,6 +49,8 @@ fn read_messages(mut stream: TcpStream, nick: &str) {
                 std::process::exit(0);
             }
             Ok(size) => {
+                let mut lock = timestamp.lock().unwrap();
+                *lock = Instant::now();
                 let msg_bytes: &[u8] = &buffer[..size];
                 process_message(msg_bytes, nick);
             }
@@ -60,7 +62,6 @@ fn read_messages(mut stream: TcpStream, nick: &str) {
 }
 
 fn process_message(msg_bytes: &[u8], nick: &str) {
-    println!();
     match msg_bytes[0] {
         codes::ERROR => match msg_bytes[1] {
             codes::error::INVALID_ROOM => {
@@ -74,6 +75,9 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
             }
             codes::error::NOT_IN_ROOM => {
                 eprintln!("Cannot send a message before joining room. Use /join [room].")
+            }
+            codes::error::EMPTY_ROOM => {
+                eprintln!("Room is Empty");
             }
             _ => {
                 eprintln!("Error code: {:x?}", msg_bytes[1]);
@@ -158,23 +162,42 @@ pub fn start() {
     }
 
     // let host: String = input!("Enter the server host: ");
-    let host: &str = "localhost";
+    let host: &str = "fab04.cecs.pdx.edu";
 
     if let Ok(mut stream) = TcpStream::connect(host.to_owned() + ":6667") {
         println!("Connected to {}", host);
 
         //another stream for reading messages
-        let stream_clone: TcpStream = stream.try_clone().expect("Failed to clone stream");
+        let reader_clone: TcpStream = stream.try_clone().expect("Failed to clone stream");
+        let mut keepalive_clone = stream.try_clone().expect("failed to clone stream");
         let nick_clone: String = nick.clone();
+
+        //timestamp for detecting unresponsive server
+        let timestamp = Arc::new(Mutex::new(Instant::now()));
+        let mut timestamp_clone: Arc<Mutex<Instant>> = Arc::clone(&timestamp);
+
         thread::spawn(move || {
-            read_messages(stream_clone, &nick_clone);
+            read_messages(reader_clone, &nick_clone, &mut timestamp_clone);
+        });
+
+        //watchdog to send keep_alive and stop client if server fails to respond
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_secs(5));
+            let lock = timestamp.lock().unwrap();
+            let now = Instant::now();
+            if now.duration_since(*lock) > Duration::from_secs(30) {
+                eprintln!("Server is unresponsive. Stopping client");
+                std::process::exit(1);
+            } else if now.duration_since(*lock) > Duration::from_secs(5) {
+                keepalive_clone.write_all(&[codes::KEEP_ALIVE]).unwrap();
+            }
         });
 
         //try to register the nickname
         one_param_op(codes::client::REGISTER_NICK, &mut stream, &nick);
 
         loop {
-            let mut inp = String::new();
+            let inp;
             if active_room.is_empty() {
                 inp = input!("");
             } else {

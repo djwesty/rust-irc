@@ -60,25 +60,57 @@ fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
 
+    //1: Make sure specified rooms exists, ifn error
+    //2: Make sure sender is a member of the room, ifn error
+    //3: Message all non-sender users in the room the message, ifnone error empty room
+    //4: Message the sender RESPONSE_OK
     let room_users: Option<&Vec<String>> = server.rooms.get(room);
+    let mut sender_stream = server
+        .users
+        .get_mut(sender)
+        .unwrap()
+        .try_clone()
+        .expect("Clone issue");
+    //1
     match room_users {
         Some(users) => {
+            //2
+            let mut is_member = false;
             for user in users {
-                let stream: Option<&mut TcpStream> = server.users.get_mut(user);
-                match stream {
-                    Some(str) => {
-                        str.write_all(&out_buf).unwrap();
-                    }
-                    None => {
-                        //TODO send error msg to sender
-                        eprintln!("Error: Invalid message from client");
+                if user.eq(sender) {
+                    is_member = true;
+                }
+            }
+
+            if is_member {
+                for user in users {
+                    if user.eq(sender) {
+                        //4
+                        sender_stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+                    } else {
+                        //3
+                        let recipient_stream: Option<&mut TcpStream> = server.users.get_mut(user);
+                        match recipient_stream {
+                            Some(str) => {
+                                println!("Sending msg {:?}", out_buf.to_ascii_lowercase());
+                                str.write_all(&out_buf).unwrap();
+                            }
+                            None => {
+                                eprintln!("Server error: could not find user");
+                            }
+                        }
                     }
                 }
+            } else {
+                sender_stream
+                    .write_all(&[codes::ERROR, codes::error::NOT_IN_ROOM])
+                    .unwrap();
             }
         }
         None => {
-            //TODO send error msg to sender
-            eprintln!("Error: Invalid message from client");
+            sender_stream
+                .write_all(&[codes::ERROR, codes::error::EMPTY_ROOM])
+                .unwrap();
         }
     }
 }
@@ -184,36 +216,21 @@ fn handle_client(
         codes::client::MESSAGE => {
             #[cfg(debug_assertions)]
             println!("MESSAGE");
+            stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+        }
+
+        codes::KEEP_ALIVE => {
+            println!("kEEP alive");
+            stream.write_all(&[codes::RESPONSE_OK]).unwrap();
         }
 
         codes::client::MESSAGE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Option<(&str, &str)> = p.split_once(" ");
+
             match params {
                 Some((room, msg)) => {
-                    let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-                    let users_in_room: Option<&Vec<String>> = unlocked_server.rooms.get(room);
-                    match users_in_room {
-                        Some(users) => {
-                            let is_user_in_room: Option<&String> =
-                                users.iter().find(|&u| u.eq(nickname));
-                            match is_user_in_room {
-                                Some(_) => {
-                                    message(room, msg, nickname, server);
-                                }
-                                None => {
-                                    stream
-                                        .write_all(&[codes::ERROR, codes::error::NOT_IN_ROOM])
-                                        .unwrap();
-                                }
-                            }
-                        }
-                        None => {
-                            stream
-                                .write_all(&[codes::ERROR, codes::error::INVALID_ROOM])
-                                .unwrap();
-                        }
-                    }
+                    message(room, msg, nickname, server);
                 }
                 _ => {
                     stream
@@ -402,6 +419,7 @@ pub fn start() {
         println!("1: list connected users");
         println!("2: list rooms");
         println!("3: Broadcast message to all");
+        println!("4: Freeze server via double lock (for testing)");
         let inp: String = input!(":");
         match inp.parse::<u8>() {
             Ok(num) => match num {
@@ -415,6 +433,10 @@ pub fn start() {
                 3 => {
                     let inp2 = input!("Enter message: ");
                     broadcast(codes::client::MESSAGE, &server, &inp2);
+                }
+                4 => {
+                    let s1 = server.lock().unwrap();
+                    let s2 = server.lock().unwrap();
                 }
                 _ => println!("Invalid Input"),
             },

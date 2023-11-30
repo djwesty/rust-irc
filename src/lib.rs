@@ -26,6 +26,7 @@ pub mod codes {
         pub const MALFORMED: u8 = 0x15;
         pub const ALREADY_IN_ROOM: u8 = 0x16;
         pub const NOT_IN_ROOM: u8 = 0x17;
+        pub const EMPTY_ROOM: u8 = 0x8;
     }
 }
 
