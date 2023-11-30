@@ -59,6 +59,7 @@ fn read_messages(mut stream: TcpStream, nick: &str) {
 }
 
 fn process_message(msg_bytes: &[u8], nick: &str) {
+    println!();
     match msg_bytes[0] {
         codes::ERROR =>
         {
@@ -70,11 +71,9 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
                     println!(
                         "Nickname already in use on server. Connect again with a different one"
                     );
-                    disconnect();
                 }
                 codes::error::SERVER_FULL => {
                     println!("Server is full. Try again later");
-                    disconnect();
                 }
                 _ => {
                     println!("Error code: {:x?}", msg_bytes[1]);
@@ -113,6 +112,10 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
             let message = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
             println!("{}", message);
         }
+        codes::QUIT => {
+            println!("Server has closed the connection. Stopping client");
+            std::process::exit(0);
+        }
         _ => {
             #[cfg(debug_assertions)]
             println!("BAD RESPONSE = {:x?} ", msg_bytes[0]);
@@ -120,7 +123,10 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
     }
 }
 
-fn disconnect() {}
+fn disconnect(stream: &mut TcpStream) {
+    stream.write_all(&[codes::QUIT]).unwrap();
+    stream.shutdown(std::net::Shutdown::Both).unwrap();
+}
 
 fn help() {
     clear();
@@ -179,7 +185,7 @@ pub fn start() {
                 Some(cmd) => {
                     let param: Option<&str> = args.next();
                     match cmd {
-                        "/quit" => disconnect(),
+                        "/quit" => {disconnect(&mut stream); break},
                         "/rooms" => no_param_op(codes::client::LIST_ROOMS, &mut stream),
                         "/users" => no_param_op(codes::client::LIST_USERS, &mut stream),
                         "/list" => match param {

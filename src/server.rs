@@ -30,7 +30,6 @@ impl Server {
 
 
 fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
-    println!("message fn {} {}", room, msg);
     let size = room.len() + msg.len() + sender.len() + 3;
     let mut out_buf: Vec<u8> = vec![0; size];
 
@@ -59,7 +58,7 @@ fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
         byte += 1;
     }
 
-    let mut guard = server.lock().unwrap();
+    let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
 
     let room_users: Option<&Vec<String>> = server.rooms.get(room);
@@ -95,10 +94,20 @@ fn broadcast(op: u8, server: &Arc<Mutex<Server>>, message: &str) {
     }
 
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-    let streams = unlocked_server.users.values_mut();
+    let streams: std::collections::hash_map::ValuesMut<'_, String, TcpStream> = unlocked_server.users.values_mut();
     for stream in streams {
         stream.write_all(&out_buf).unwrap();
     }
+}
+
+fn disconnect_all(server: &Arc<Mutex<Server>>,) {
+    let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+    let users: std::collections::hash_map::ValuesMut<'_, String, TcpStream> = guard.users.values_mut();
+    users.for_each(|user: &mut TcpStream|  {
+        user.write(&[codes::QUIT]).unwrap();
+        user.shutdown(std::net::Shutdown::Both);
+    })
+
 }
 
 fn handle_client(
@@ -193,6 +202,9 @@ fn handle_client(
                 }
             }
         }
+        codes::QUIT => {
+            remove_user(server, nickname,stream);
+        }
         _ => {
             #[cfg(debug_assertions)]
             println!("Unspecified client Op, {:x?}", cmd_bytes);
@@ -200,6 +212,18 @@ fn handle_client(
     }
 
     // }
+}
+
+fn remove_user(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStream) {
+    let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+    let server: &mut Server = guard.deref_mut();
+    let mut rooms: &mut HashMap<String, Vec<String>> = &mut server.rooms;
+    rooms.values_mut().for_each(|room: &mut Vec<String>| {
+        room.retain(|u| !u.eq(nickname));
+    });
+    let  users: &mut HashMap<String, TcpStream> = &mut server.users;
+    users.remove(nickname);
+    
 }
 
 fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStream) {
@@ -214,10 +238,13 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
     } else {
         // Add the user to the user list
         let clone = stream.try_clone().expect("fail to clone");
-        unlocked_server.users.insert(nickname.to_string(), clone);
+        let addr = clone.peer_addr().unwrap().to_string();
 
+        unlocked_server.users.insert(nickname.to_string(), clone);
         // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+        
+        println!("{} has registered nickname {}", addr, nickname);
     }
 }
 
@@ -285,7 +312,11 @@ pub fn start() {
 
                     thread::spawn(move || {
                         let nickname: String;
+                        println!("IP {} has connected", stream.peer_addr().unwrap().to_string());
                         match stream.read(&mut buf_in) {
+                            Ok(0) => {
+                                println!("IP {} has closed the connection", stream.peer_addr().unwrap().to_string());
+                            }
                             Ok(size) => {
                                 let cmd_bytes: &[u8] = &buf_in[0..1];
                                 let param_bytes: &[u8] = &buf_in[1..size];
@@ -294,6 +325,10 @@ pub fn start() {
                                     register_nick(&server_inner, &nickname, &mut stream);
                                     loop {
                                         match stream.read(&mut buf_in) {
+                                            Ok(0) => {
+                                                println!("IP {} wit nickname {} has closed the connection", stream.peer_addr().unwrap().to_string(), nickname);
+                                                break;
+                                            }
                                             Ok(size) => {
                                                 let cmd_bytes: &[u8] = &buf_in[0..1];
                                                 let param_bytes: &[u8] = &buf_in[1..size];
@@ -345,7 +380,10 @@ pub fn start() {
         match inp.parse::<u8>() {
             Ok(num) => match num {
                 0 => {
-                    println!("Goodbye");
+                    println!("Stopping Server");
+                    disconnect_all(&server);
+                    break;
+
                 }
                 1 => println!("Users: {:?}", server.lock().unwrap().users),
                 2 => println!("Rooms: {:?}", server.lock().unwrap().rooms),
