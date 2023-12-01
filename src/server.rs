@@ -28,7 +28,7 @@ impl Server {
 }
 
 fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
-    let code_bytes = &[codes::client::MESSAGE_ROOM];
+    let code_bytes = &[codes::MESSAGE_ROOM];
     let room_bytes = room.as_bytes();
     let msg_bytes = msg.as_bytes();
     let sender_bytes = sender.as_bytes();
@@ -137,12 +137,12 @@ fn handle_client(
 ) {
     // handle user commands
     match cmd_bytes[0] {
-        codes::client::REGISTER_NICK => {
+        codes::REGISTER_NICK => {
             stream
                 .write_all(&[codes::ERROR, codes::error::ALREADY_REGISTERED])
                 .unwrap();
         }
-        codes::client::LIST_ROOMS => {
+        codes::LIST_ROOMS => {
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
             let mut buf_out: Vec<u8> = Vec::new();
             buf_out.extend_from_slice(&[codes::RESPONSE]);
@@ -153,7 +153,7 @@ fn handle_client(
             stream.write(&buf_out).unwrap();
         }
 
-        codes::client::LIST_USERS => {
+        codes::LIST_USERS => {
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
             let mut buf_out: Vec<u8> = Vec::new();
             buf_out.extend_from_slice(&[codes::RESPONSE]);
@@ -164,7 +164,7 @@ fn handle_client(
             stream.write(&buf_out).unwrap();
         }
 
-        codes::client::LIST_USERS_IN_ROOM => {
+        codes::LIST_USERS_IN_ROOM => {
             let room: String = String::from_utf8_lossy(param_bytes).to_string();
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
             let mut buf_out: Vec<u8> = Vec::new();
@@ -185,14 +185,14 @@ fn handle_client(
             }
         }
 
-        codes::client::JOIN_ROOM => {
+        codes::JOIN_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Vec<&str> = p.split_whitespace().collect();
             let room = params.get(0).unwrap();
             join_room(server, &nickname, room, stream);
         }
 
-        codes::client::LEAVE_ROOM => {
+        codes::LEAVE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Vec<&str> = p.split_whitespace().collect();
             let room = params.get(0).unwrap();
@@ -200,7 +200,7 @@ fn handle_client(
         }
 
         //Generic message sent to all users of all rooms the clients nickname is in, except the client nickname
-        codes::client::MESSAGE => {
+        codes::MESSAGE => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
 
             message_all_senders_rooms(server, &nickname, &p, stream);
@@ -212,7 +212,7 @@ fn handle_client(
         }
 
         //A message sent just to the users of the room passed in, except the client nickname
-        codes::client::MESSAGE_ROOM => {
+        codes::MESSAGE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Option<(&str, &str)> = p.split_once(" ");
             match params {
@@ -247,7 +247,7 @@ fn message_all_senders_rooms(
     let rooms: Vec<String> = get_rooms_of_user(server, sender);
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let sender_bytes: &[u8] = sender.as_bytes();
-    let code_bytes: &[u8] = &[codes::client::MESSAGE_ROOM];
+    let code_bytes: &[u8] = &[codes::MESSAGE_ROOM];
     let message_bytes: &[u8] = message.as_bytes();
     let space_bytes: &[u8] = &[0x20];
     for room in rooms {
@@ -427,7 +427,7 @@ pub fn start() {
                                     Ok(size) => {
                                         let cmd_bytes: &[u8] = &buf_in[0..1];
                                         let param_bytes: &[u8] = &buf_in[1..size];
-                                        if cmd_bytes[0] == codes::client::REGISTER_NICK {
+                                        if cmd_bytes[0] == codes::REGISTER_NICK {
                                             nickname =
                                                 String::from_utf8_lossy(param_bytes).to_string();
                                             register_nick(&server_inner, &nickname, &mut stream);
@@ -503,7 +503,7 @@ pub fn start() {
                         2 => println!("Rooms: {:?}", server.lock().unwrap().rooms),
                         3 => {
                             let inp2 = input!("Enter message: ");
-                            broadcast(codes::client::MESSAGE, &server, &inp2);
+                            broadcast(codes::MESSAGE, &server, &inp2);
                         }
                         4 => {
                             let s1 = server.lock().unwrap();

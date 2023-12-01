@@ -87,12 +87,12 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
             }
         },
 
-        codes::client::MESSAGE => {
+        codes::MESSAGE => {
             let message: String =
                 String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
             println!("[server]:{}", message);
         }
-        codes::client::MESSAGE_ROOM => {
+        codes::MESSAGE_ROOM => {
             let params = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
             match params.split_once(" ") {
                 Some((room, remainder)) => match remainder.split_once(" ") {
@@ -192,7 +192,7 @@ pub fn start() {
         });
 
         //try to register the nickname
-        one_param_op(codes::client::REGISTER_NICK, &mut stream, &nick);
+        one_param_op(codes::REGISTER_NICK, &mut stream, &nick);
 
         loop {
             let inp: String = input!("");
@@ -204,7 +204,7 @@ pub fn start() {
                             eprintln!("Malformaed. Try /list [room-name]");
                         }
                         _ => {
-                            one_param_op(codes::client::LIST_USERS_IN_ROOM, &mut stream, param);
+                            one_param_op(codes::LIST_USERS_IN_ROOM, &mut stream, param);
                         }
                     },
                     "/join" => match param.split_once(" ") {
@@ -212,7 +212,7 @@ pub fn start() {
                             eprintln!("Malformed. Try /join [room-name]");
                         }
                         _ => {
-                            one_param_op(codes::client::JOIN_ROOM, &mut stream, param);
+                            one_param_op(codes::JOIN_ROOM, &mut stream, param);
                         }
                     },
 
@@ -221,12 +221,12 @@ pub fn start() {
                             eprintln!("Malformed. Try /leave [room-name]");
                         }
                         _ => {
-                            one_param_op(codes::client::LEAVE_ROOM, &mut stream, param);
+                            one_param_op(codes::LEAVE_ROOM, &mut stream, param);
                         }
                     },
                     "/msg" => match param.split_once(" ") {
                         Some((room, msg)) => {
-                            two_param_op(codes::client::MESSAGE_ROOM, &mut stream, room, msg);
+                            two_param_op(codes::MESSAGE_ROOM, &mut stream, room, msg);
                         }
                         _ => {
                             eprintln!("Usage: /msg [room] [message]");
@@ -242,15 +242,15 @@ pub fn start() {
                         disconnect(&mut stream);
                         break;
                     }
-                    "/rooms" => no_param_op(codes::client::LIST_ROOMS, &mut stream),
-                    "/users" => no_param_op(codes::client::LIST_USERS, &mut stream),
+                    "/rooms" => no_param_op(codes::LIST_ROOMS, &mut stream),
+                    "/users" => no_param_op(codes::LIST_USERS, &mut stream),
                     "/help" => {
                         help();
                     }
                     "/" => {
                         println!("Invalid command");
                     }
-                    _ => one_param_op(codes::client::MESSAGE, &mut stream, &inp),
+                    _ => one_param_op(codes::MESSAGE, &mut stream, &inp),
                 },
             }
         }
