@@ -18,13 +18,13 @@ pub mod codes {
     pub mod error {
         pub const INVALID_ROOM: u8 = 0x10;
         pub const NICKNAME_COLLISION: u8 = 0x11;
-        pub const SERVER_FULL: u8 = 0x12;
+        pub const SERVER_FULL: u8 = 0x12; // Not used
         pub const ALREADY_REGISTERED: u8 = 0x13;
         pub const NOT_YET_REGISTERED: u8 = 0x14;
         pub const MALFORMED: u8 = 0x15;
         pub const ALREADY_IN_ROOM: u8 = 0x16;
         pub const NOT_IN_ROOM: u8 = 0x17;
-        pub const EMPTY_ROOM: u8 = 0x8;
+        pub const EMPTY_ROOM: u8 = 0x18;
     }
 }
 

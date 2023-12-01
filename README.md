@@ -12,25 +12,9 @@ Here we have a simple irc-like client and server application in rust, and librar
 
 
 ### Behaviour
-#### Server
-* A host can run the server application on port 6667
-* The server can stop gracefully with `0`
-* The server can list connected users with `1`
-* The server can list active rooms with `2`
-* The server can broadcast a message to all users with `3`
-* The server can intentionally double lock with `4` (For testing/demonstration only)
-#### Client
-* A client can connect to a specified host
-* A client can become a user by registering their desired nickname with the server (avoiding collisions)
-* A new server has no rooms yet, and a new user is not a part of any room.
-* A user may both join and create (as relevant) a room with `/join [room]`
-* A user may both leave and destroy (as relevant) a room with `/leave [room]`
-* A user may see the nickname of all other connected users with `/users`
-* A user may see all rooms in existance with `/rooms`
-* A user may see all users in a given room with `/list [room]`
-* A user may send a message to a specific room (which they have joined) with `/msg [message]`
-* A user may simultanously message all rooms they have joined by simply entering their message, not as a command. 
-* A user may stop gracefully with `/quit`
+For behaviour and protocol implementation, please consult rfc.txt
+
+## Source Code
 
 ### `src/lib.rs`
 This file contains primarily the unique list of bytecodes used by both the client and the server in the irc implementation. Each message in either direction always start with one of these bytecodes in the stream. Errors are generally followed by a 2nd special error byte code also. This file also contains some shared/re-usable functions for modularity
@@ -54,6 +38,9 @@ The client application will
 The use of stdout/stdin on this project leaves user experience to be desired on the client. This is most noticible when the client is part way through typing a prompt, and a message from the server is displayed in stdout. In the future, a simple window application for the client with a dedicated input and output section would address this. 
 
 Another element to be desired is de-muxing of the channel streams that are displayed to the client. Ideally more work could be done so that the client could choose to 'show' just one room at a time, and switch between room views with easy. Message that come in on the room not shown, would be cached in memory until displayed. With my approach, all client messages are displayed in the same stdout for simplicity. 
+
+### `src/main.rs`
+A simple entrypoint which will look for the `s` or `c` command line argument to run the server or client module. 
 
 ## Building/ Running
 To run the client in debug mode
