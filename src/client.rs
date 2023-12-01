@@ -79,6 +79,9 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
             codes::error::EMPTY_ROOM => {
                 eprintln!("Room is Empty");
             }
+            codes::error::ALREADY_IN_ROOM => {
+                eprintln!("You are already in that room");
+            }
             _ => {
                 eprintln!("Error code: {:x?}", msg_bytes[1]);
             }

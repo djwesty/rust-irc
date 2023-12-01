@@ -220,7 +220,6 @@ fn handle_client(
         }
 
         codes::KEEP_ALIVE => {
-            println!("kEEP alive");
             stream.write_all(&[codes::RESPONSE_OK]).unwrap();
         }
 
@@ -304,7 +303,14 @@ fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut T
             unlocked_server.rooms.insert(room.to_string(), list);
         }
     }
-    stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+    drop(unlocked_server);
+    let rooms: Vec<String> = get_rooms_of_user(server, user);
+    let rooms_expanded: String = rooms.join(",");
+    let response: String = format!("Joined {}. Current rooms: {}", room, rooms_expanded);
+    let res_bytes: &[u8] = response.as_bytes();
+    let code_bytes: &[u8] = &[codes::RESPONSE];
+    let out: &Vec<u8> = &[code_bytes, res_bytes].concat();
+    stream.write_all(out).unwrap();
 }
 
 fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut TcpStream) {
@@ -315,13 +321,27 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
             l.retain(|item: &String| item != user);
             if l.len() == 0 {
                 unlocked_server.rooms.remove(room);
-                stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+                drop(unlocked_server);
+                let rooms: Vec<String> = get_rooms_of_user(server, user);
+                let rooms_expanded: String = rooms.join(",");
+                let response: String = format!("Left {}. Current rooms: {}", room, rooms_expanded);
+                let code_bytes: &[u8] = &[codes::RESPONSE];
+                let res_bytes: &[u8] = response.as_bytes();
+                let out: &Vec<u8> = &[code_bytes, res_bytes].concat();
+                stream.write_all(out).unwrap();
             } else if l.len() == before_len {
                 stream
                     .write_all(&[codes::ERROR, codes::error::INVALID_ROOM])
                     .unwrap();
             } else {
-                stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+                drop(unlocked_server);
+                let rooms: Vec<String> = get_rooms_of_user(server, user);
+                let rooms_expanded: String = rooms.join(",");
+                let response: String = format!("Left {}. Current rooms: {}", room, rooms_expanded);
+                let code_bytes: &[u8] = &[codes::RESPONSE];
+                let res_bytes: &[u8] = response.as_bytes();
+                let out: &Vec<u8> = &[code_bytes, res_bytes].concat();
+                stream.write_all(out).unwrap();
             }
         }
         None => {
@@ -330,6 +350,24 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
                 .unwrap();
         }
     }
+}
+
+// Iterate on all rooms, capture each room name which has the user
+// return a vec of strings of room names
+fn get_rooms_of_user(server: &Arc<Mutex<Server>>, user: &str) -> Vec<String> {
+    let mut result: Vec<String> = vec![];
+    let guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+    let rooms: std::collections::hash_map::Keys<'_, String, Vec<String>> = guard.rooms.keys();
+    rooms.for_each(|room| {
+        let user_vec = guard.rooms.get(room).unwrap();
+        for usr in user_vec {
+            if usr.eq(user) {
+                result.push(room.to_string());
+                break;
+            }
+        }
+    });
+    result
 }
 
 pub fn start() {
