@@ -238,7 +238,7 @@ pub fn start() {
                             two_param_op(codes::client::MESSAGE_ROOM, &mut stream, room, msg);
                         }
                         _ => {
-                            println!("Ufsage: /msg [room] [message]");
+                            println!("Usage: /msg [room] [message]");
                         }
                     },
                     "/help" => {
