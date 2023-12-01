@@ -88,7 +88,8 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
         },
 
         codes::client::MESSAGE => {
-            let message = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
+            let message: String =
+                String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
             println!("[server]:{}", message);
         }
         codes::client::MESSAGE_ROOM => {
@@ -110,10 +111,7 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
             }
         }
 
-        codes::RESPONSE_OK => {
-            // #[cfg(debug_assertions)]
-            // println!("RESPONSE_OK");
-        }
+        codes::RESPONSE_OK => {}
         codes::RESPONSE => {
             let message = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
             println!("{}", message);
@@ -135,7 +133,6 @@ fn disconnect(stream: &mut TcpStream) {
 }
 
 fn help() {
-    clear();
     println!("Available commands:");
     println!("/quit <- Disconnect and stop the client");
     println!("/rooms <- List all of the rooms on the server");
@@ -143,7 +140,7 @@ fn help() {
     println!("/list [room-name] <- List all of the users in the given room");
     println!("/join [room-name] <- Join the given room. Create the room if it does not exist");
     println!(
-        "/leave [room-name] <- Leave the given room. Error if the you are not already in the room"
+        "/leave [room-name] <- Leave the given room. Error if you are not already in the room"
     );
 }
 
@@ -174,7 +171,7 @@ pub fn start() {
         let nick_clone: String = nick.clone();
 
         //timestamp for detecting unresponsive server
-        let timestamp = Arc::new(Mutex::new(Instant::now()));
+        let timestamp: Arc<Mutex<Instant>> = Arc::new(Mutex::new(Instant::now()));
         let mut timestamp_clone: Arc<Mutex<Instant>> = Arc::clone(&timestamp);
 
         thread::spawn(move || {
@@ -184,8 +181,8 @@ pub fn start() {
         //watchdog to send keep_alive and stop client if server fails to respond
         thread::spawn(move || loop {
             thread::sleep(Duration::from_secs(5));
-            let lock = timestamp.lock().unwrap();
-            let now = Instant::now();
+            let lock: std::sync::MutexGuard<'_, Instant> = timestamp.lock().unwrap();
+            let now: Instant = Instant::now();
             if now.duration_since(*lock) > Duration::from_secs(30) {
                 eprintln!("Server is unresponsive. Stopping client");
                 std::process::exit(1);
@@ -198,27 +195,21 @@ pub fn start() {
         one_param_op(codes::client::REGISTER_NICK, &mut stream, &nick);
 
         loop {
-            let inp = input!("");
+            let inp: String = input!("");
 
             match inp.split_once(" ") {
                 Some((cmd, param)) => match cmd {
-                    "/quit" => {
-                        disconnect(&mut stream);
-                        break;
-                    }
-                    "/rooms" => no_param_op(codes::client::LIST_ROOMS, &mut stream),
-                    "/users" => no_param_op(codes::client::LIST_USERS, &mut stream),
                     "/list" => match param.split_once(" ") {
-                        Some((room, _)) => {
-                            one_param_op(codes::client::LIST_USERS_IN_ROOM, &mut stream, room);
+                        Some((_, _)) => {
+                            eprintln!("Malformaed. Try /list [room-name]");
                         }
                         _ => {
-                            println!("Malformaed. Try /list [room-name]");
+                            one_param_op(codes::client::LIST_USERS_IN_ROOM, &mut stream, param);
                         }
                     },
                     "/join" => match param.split_once(" ") {
                         Some((_, _)) => {
-                            println!("Malformed. Try /join [room-name]");
+                            eprintln!("Malformed. Try /join [room-name]");
                         }
                         _ => {
                             one_param_op(codes::client::JOIN_ROOM, &mut stream, param);
@@ -227,7 +218,7 @@ pub fn start() {
 
                     "/leave" => match param.split_once(" ") {
                         Some((_, _)) => {
-                            println!("Malformed. Try /leave [room-name]");
+                            eprintln!("Malformed. Try /leave [room-name]");
                         }
                         _ => {
                             one_param_op(codes::client::LEAVE_ROOM, &mut stream, param);
@@ -238,22 +229,29 @@ pub fn start() {
                             two_param_op(codes::client::MESSAGE_ROOM, &mut stream, room, msg);
                         }
                         _ => {
-                            println!("Usage: /msg [room] [message]");
+                            eprintln!("Usage: /msg [room] [message]");
                         }
                     },
+                    _ => {
+                        eprintln!("Malformed command. Try /help");
+                    }
+                },
+
+                _ => match inp.as_str() {
+                    "/quit" => {
+                        disconnect(&mut stream);
+                        break;
+                    }
+                    "/rooms" => no_param_op(codes::client::LIST_ROOMS, &mut stream),
+                    "/users" => no_param_op(codes::client::LIST_USERS, &mut stream),
                     "/help" => {
                         help();
                     }
                     "/" => {
                         println!("Invalid command");
                     }
-                    _ => {
-                        one_param_op(codes::client::MESSAGE, &mut stream, &inp);
-                    }
+                    _ => one_param_op(codes::client::MESSAGE, &mut stream, &inp),
                 },
-                _ => {
-                    one_param_op(codes::client::MESSAGE, &mut stream, &inp);
-                }
             }
         }
     } else {
