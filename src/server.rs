@@ -8,7 +8,7 @@ use std::{
 };
 
 use prompted::input;
-use rust_irc::{clear, codes};
+use rust_irc::{clear, codes, SPACE_BYTES};
 
 const SERVER_ADDRESS: &str = "0.0.0.0:6667";
 const MAX_USERS: usize = 20;
@@ -28,34 +28,21 @@ impl Server {
     }
 }
 
-fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
-    let size = room.len() + msg.len() + sender.len() + 3;
-    let mut out_buf: Vec<u8> = vec![0; size];
-
-    let mut byte: usize = 0;
-    out_buf[byte] = codes::client::MESSAGE_ROOM;
-    byte += 1;
-
-    for i in 0..room.len() {
-        out_buf[byte] = *room.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
-
-    out_buf[byte] = 0x20;
-    byte += 1;
-
-    for i in 0..sender.len() {
-        out_buf[byte] = *sender.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
-
-    out_buf[byte] = 0x20;
-    byte += 1;
-
-    for i in 0..msg.len() {
-        out_buf[byte] = *msg.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
+fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
+    let code_bytes = &[codes::client::MESSAGE_ROOM];
+    let room_bytes = room.as_bytes();
+    let msg_bytes = msg.as_bytes();
+    let sender_bytes = sender.as_bytes();
+    let out_buf: &Vec<u8> = &[
+        code_bytes,
+        room_bytes,
+        SPACE_BYTES,
+        sender_bytes,
+        SPACE_BYTES,
+        msg_bytes,
+    ]
+    .concat();
+    println!("out buf {:?} ", out_buf.to_ascii_lowercase());
 
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
@@ -64,6 +51,7 @@ fn message(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
     //2: Make sure sender is a member of the room, ifn error
     //3: Message all non-sender users in the room the message, ifnone error empty room
     //4: Message the sender RESPONSE_OK
+    println!("checking room {} ", room);
     let room_users: Option<&Vec<String>> = server.rooms.get(room);
     let mut sender_stream = server
         .users
@@ -213,9 +201,11 @@ fn handle_client(
             leave_room(server, &nickname, room, stream);
         }
 
+        //Generic message sent to all users of all rooms the clients nickname is in, except the client nickname
         codes::client::MESSAGE => {
-            #[cfg(debug_assertions)]
-            println!("MESSAGE");
+            let p: String = String::from_utf8_lossy(param_bytes).to_string();
+
+            message_all_senders_rooms(server, &nickname, &p, stream);
             stream.write_all(&[codes::RESPONSE_OK]).unwrap();
         }
 
@@ -223,13 +213,13 @@ fn handle_client(
             stream.write_all(&[codes::RESPONSE_OK]).unwrap();
         }
 
+        //A message sent just to the users of the room passed in, except the client nickname
         codes::client::MESSAGE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Option<(&str, &str)> = p.split_once(" ");
-
             match params {
                 Some((room, msg)) => {
-                    message(room, msg, nickname, server);
+                    message_room(room, msg, nickname, server);
                 }
                 _ => {
                     stream
@@ -250,6 +240,42 @@ fn handle_client(
     // }
 }
 
+fn message_all_senders_rooms(
+    server: &Arc<Mutex<Server>>,
+    sender: &str,
+    message: &str,
+    stream: &mut TcpStream,
+) {
+    let rooms = get_rooms_of_user(server, sender);
+    let mut guard = server.lock().unwrap();
+    let sender_bytes: &[u8] = sender.as_bytes();
+    let code_bytes: &[u8] = &[codes::client::MESSAGE_ROOM];
+    let message_bytes: &[u8] = message.as_bytes();
+    let space_bytes: &[u8] = &[0x20];
+    for room in rooms {
+        let room_bytes: &[u8] = room.as_bytes();
+        let users = guard.rooms.get(&room).unwrap().clone();
+        let out_buf: &Vec<u8> = &[
+            code_bytes,
+            room_bytes,
+            space_bytes,
+            sender_bytes,
+            space_bytes,
+            message_bytes,
+        ]
+        .concat();
+
+        for user in users {
+            if !user.eq(sender) {
+                let stream = guard.users.get_mut(&user);
+                stream.unwrap().write_all(out_buf).unwrap();
+            }
+        }
+        stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+    }
+}
+
+/// Remove a user from any rooms they may be in, then drop the user
 fn remove_user(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStream) {
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
@@ -261,8 +287,8 @@ fn remove_user(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStre
     users.remove(nickname);
 }
 
+/// Add a nickname to the Server, being careful to handle a possible collision.
 fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStream) {
-    // Check for nickname collision
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     if unlocked_server.users.contains_key(nickname) {
         #[cfg(debug_assertions)]
@@ -271,18 +297,17 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
             .write_all(&[codes::ERROR, codes::error::NICKNAME_COLLISION])
             .unwrap();
     } else {
-        // Add the user to the user list
         let clone: TcpStream = stream.try_clone().expect("fail to clone");
         let addr: String = clone.peer_addr().unwrap().to_string();
 
         unlocked_server.users.insert(nickname.to_string(), clone);
-        // Send response ok
         stream.write_all(&[codes::RESPONSE_OK]).unwrap();
-
         println!("{} has registered nickname {}", addr, nickname);
     }
 }
 
+/// Add user to a room, creating the room if necessary
+/// Provide feedback about what room was just joined, and which rooms the user may be in
 fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut TcpStream) {
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
 
@@ -313,6 +338,8 @@ fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut T
     stream.write_all(out).unwrap();
 }
 
+/// Remove a user from a room, handling possible error cases.
+/// Provide feedback about what room was just left, and which rooms the user may still be in
 fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut TcpStream) {
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     match unlocked_server.rooms.get_mut(room) {
@@ -352,8 +379,8 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
     }
 }
 
-// Iterate on all rooms, capture each room name which has the user
-// return a vec of strings of room names
+/// Iterate on all rooms, capture each room name which has the user
+/// return a vec of strings of room names
 fn get_rooms_of_user(server: &Arc<Mutex<Server>>, user: &str) -> Vec<String> {
     let mut result: Vec<String> = vec![];
     let guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
@@ -452,13 +479,14 @@ pub fn start() {
         }
     });
 
+    // Main Menu Loop on the main thread.
     loop {
         println!("0: Quit Server");
         println!("1: list connected users");
         println!("2: list rooms");
         println!("3: Broadcast message to all");
         println!("4: Freeze server via double lock (for testing)");
-        let inp: String = input!(":");
+        let inp: String = input!("");
         match inp.parse::<u8>() {
             Ok(num) => match num {
                 0 => {

@@ -33,3 +33,5 @@ pub mod codes {
 pub fn clear() {
     print!("\x1B[2J");
 }
+
+pub const SPACE_BYTES: &[u8] = &[0x20];

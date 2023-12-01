@@ -145,14 +145,12 @@ fn help() {
     println!(
         "/leave [room-name] <- Leave the given room. Error if the you are not already in the room"
     );
-    println!("/show [room-name] <- Switch your focus to the given room. It is suggested to join the room first");
 }
 
 pub fn start() {
     clear();
     println!("Starting the IRC client. No spaces allowed in nicknames or room names. /help to see available commands");
     let mut nick: String;
-    let mut active_room: String = String::new();
     loop {
         nick = input!("Enter your nickname : ");
         if nick.contains(" ") {
@@ -200,88 +198,62 @@ pub fn start() {
         one_param_op(codes::client::REGISTER_NICK, &mut stream, &nick);
 
         loop {
-            let inp;
-            if active_room.is_empty() {
-                inp = input!("");
-            } else {
-                inp = input!("\n[{}]:", active_room);
-            }
-            let mut args: std::str::SplitWhitespace<'_> = inp.split_whitespace();
-            let command: Option<&str> = args.next();
+            let inp = input!("");
 
-            match command {
-                Some(cmd) => {
-                    let param: Option<&str> = args.next();
-                    match cmd {
-                        "/quit" => {
-                            disconnect(&mut stream);
-                            break;
-                        }
-                        "/rooms" => no_param_op(codes::client::LIST_ROOMS, &mut stream),
-                        "/users" => no_param_op(codes::client::LIST_USERS, &mut stream),
-                        "/list" => match param {
-                            Some(room) => {
-                                one_param_op(codes::client::LIST_USERS_IN_ROOM, &mut stream, room);
-                            }
-                            None => {
-                                println!("Room name expected, but not provided");
-                            }
-                        },
-                        "/join" => match param {
-                            Some(room) => {
-                                one_param_op(codes::client::JOIN_ROOM, &mut stream, room);
-                            }
-                            None => {
-                                println!("Room name expected, but not provided");
-                            }
-                        },
-                        "/show" => match param {
-                            Some(room) => {
-                                clear();
-                                active_room = room.to_string();
-                            }
-                            None => {
-                                println!("Room name expected, but not provided")
-                            }
-                        },
-                        "/leave" => match param {
-                            Some(room) => {
-                                one_param_op(codes::client::LEAVE_ROOM, &mut stream, room);
-                            }
-                            None => {
-                                println!("Room name expected, but not provided");
-                            }
-                        },
-                        "/msg" => match inp.split_once(" ") {
-                            Some((room, msg)) => {
-                                two_param_op(codes::client::MESSAGE_ROOM, &mut stream, room, msg);
-                            }
-                            None => {
-                                println!("Usage: /msg [room] [message]");
-                            }
-                        },
-                        "/help" => {
-                            help();
-                        }
-                        "/" => {
-                            println!("Invalid command");
+            match inp.split_once(" ") {
+                Some((cmd, param)) => match cmd {
+                    "/quit" => {
+                        disconnect(&mut stream);
+                        break;
+                    }
+                    "/rooms" => no_param_op(codes::client::LIST_ROOMS, &mut stream),
+                    "/users" => no_param_op(codes::client::LIST_USERS, &mut stream),
+                    "/list" => match param.split_once(" ") {
+                        Some((room, _)) => {
+                            one_param_op(codes::client::LIST_USERS_IN_ROOM, &mut stream, room);
                         }
                         _ => {
-                            if active_room.is_empty() {
-                                println!("use '/show [room]' to set an active room before sending a message");
-                            } else {
-                                let message: String = inp;
-                                two_param_op(
-                                    codes::client::MESSAGE_ROOM,
-                                    &mut stream,
-                                    &active_room,
-                                    &message,
-                                );
-                            }
+                            println!("Malformaed. Try /list [room-name]");
                         }
+                    },
+                    "/join" => match param.split_once(" ") {
+                        Some((_, _)) => {
+                            println!("Malformed. Try /join [room-name]");
+                        }
+                        _ => {
+                            one_param_op(codes::client::JOIN_ROOM, &mut stream, param);
+                        }
+                    },
+
+                    "/leave" => match param.split_once(" ") {
+                        Some((_, _)) => {
+                            println!("Malformed. Try /leave [room-name]");
+                        }
+                        _ => {
+                            one_param_op(codes::client::LEAVE_ROOM, &mut stream, param);
+                        }
+                    },
+                    "/msg" => match param.split_once(" ") {
+                        Some((room, msg)) => {
+                            two_param_op(codes::client::MESSAGE_ROOM, &mut stream, room, msg);
+                        }
+                        _ => {
+                            println!("Ufsage: /msg [room] [message]");
+                        }
+                    },
+                    "/help" => {
+                        help();
                     }
+                    "/" => {
+                        println!("Invalid command");
+                    }
+                    _ => {
+                        one_param_op(codes::client::MESSAGE, &mut stream, &inp);
+                    }
+                },
+                _ => {
+                    one_param_op(codes::client::MESSAGE, &mut stream, &inp);
                 }
-                None => {}
             }
         }
     } else {
