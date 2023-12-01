@@ -11,7 +11,6 @@ use prompted::input;
 use rust_irc::{clear, codes, SPACE_BYTES};
 
 const SERVER_ADDRESS: &str = "0.0.0.0:6667";
-const MAX_USERS: usize = 20;
 
 #[derive(Debug)]
 struct Server {
@@ -42,7 +41,6 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
         msg_bytes,
     ]
     .concat();
-    println!("out buf {:?} ", out_buf.to_ascii_lowercase());
 
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
@@ -150,7 +148,7 @@ fn handle_client(
             buf_out.extend_from_slice(&[codes::RESPONSE]);
             for (room, _user) in &unlocked_server.rooms {
                 buf_out.extend_from_slice(room.as_bytes());
-                buf_out.extend_from_slice(&[0x20]);
+                buf_out.extend_from_slice(SPACE_BYTES);
             }
             stream.write(&buf_out).unwrap();
         }
@@ -161,7 +159,7 @@ fn handle_client(
             buf_out.extend_from_slice(&[codes::RESPONSE]);
             for (user, _) in &unlocked_server.users {
                 buf_out.extend_from_slice(user.as_bytes());
-                buf_out.extend_from_slice(&[0x20]);
+                buf_out.extend_from_slice(SPACE_BYTES);
             }
             stream.write(&buf_out).unwrap();
         }
@@ -175,7 +173,7 @@ fn handle_client(
                 Some(l) => {
                     for ele in l {
                         buf_out.extend_from_slice(ele.as_bytes());
-                        buf_out.extend_from_slice(&[0x20]);
+                        buf_out.extend_from_slice(SPACE_BYTES);
                     }
                     stream.write_all(&buf_out).unwrap();
                 }
@@ -246,15 +244,15 @@ fn message_all_senders_rooms(
     message: &str,
     stream: &mut TcpStream,
 ) {
-    let rooms = get_rooms_of_user(server, sender);
-    let mut guard = server.lock().unwrap();
+    let rooms: Vec<String> = get_rooms_of_user(server, sender);
+    let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let sender_bytes: &[u8] = sender.as_bytes();
     let code_bytes: &[u8] = &[codes::client::MESSAGE_ROOM];
     let message_bytes: &[u8] = message.as_bytes();
     let space_bytes: &[u8] = &[0x20];
     for room in rooms {
         let room_bytes: &[u8] = room.as_bytes();
-        let users = guard.rooms.get(&room).unwrap().clone();
+        let users: Vec<String> = guard.rooms.get(&room).unwrap().clone();
         let out_buf: &Vec<u8> = &[
             code_bytes,
             room_bytes,
@@ -398,117 +396,129 @@ fn get_rooms_of_user(server: &Arc<Mutex<Server>>, user: &str) -> Vec<String> {
 }
 
 pub fn start() {
-    let listener: TcpListener = TcpListener::bind(SERVER_ADDRESS).expect("Failed to bind to port");
-    let server: Arc<Mutex<Server>> = Arc::new(Mutex::new(Server::new()));
-    let server_outer: Arc<Mutex<Server>> = Arc::clone(&server);
-    clear();
-    println!("Server listening on {}", SERVER_ADDRESS);
+    let listener_result: Result<TcpListener, std::io::Error> = TcpListener::bind(SERVER_ADDRESS);
+    match listener_result {
+        Ok(listener) => {
+            let server: Arc<Mutex<Server>> = Arc::new(Mutex::new(Server::new()));
+            let server_outer: Arc<Mutex<Server>> = Arc::clone(&server);
+            clear();
+            println!("Server listening on {}", SERVER_ADDRESS);
 
-    thread::spawn(move || {
-        for tcpstream in listener.incoming() {
-            match tcpstream {
-                Ok(mut stream) => {
-                    let mut buf_in: [u8; 1024] = [0; 1024];
-                    let server_inner: Arc<Mutex<Server>> = Arc::clone(&server_outer);
+            thread::spawn(move || {
+                for tcpstream in listener.incoming() {
+                    match tcpstream {
+                        Ok(mut stream) => {
+                            let mut buf_in: [u8; 1024] = [0; 1024];
+                            let server_inner: Arc<Mutex<Server>> = Arc::clone(&server_outer);
 
-                    thread::spawn(move || {
-                        let nickname: String;
-                        println!(
-                            "IP {} has connected",
-                            stream.peer_addr().unwrap().to_string()
-                        );
-                        match stream.read(&mut buf_in) {
-                            Ok(0) => {
+                            thread::spawn(move || {
+                                let nickname: String;
                                 println!(
-                                    "IP {} has closed the connection",
+                                    "IP {} has connected",
                                     stream.peer_addr().unwrap().to_string()
                                 );
-                            }
-                            Ok(size) => {
-                                let cmd_bytes: &[u8] = &buf_in[0..1];
-                                let param_bytes: &[u8] = &buf_in[1..size];
-                                if cmd_bytes[0] == codes::client::REGISTER_NICK {
-                                    nickname = String::from_utf8_lossy(param_bytes).to_string();
-                                    register_nick(&server_inner, &nickname, &mut stream);
-                                    loop {
-                                        match stream.read(&mut buf_in) {
-                                            Ok(0) => {
-                                                println!("IP {} with nickname {} has closed the connection", stream.peer_addr().unwrap().to_string(), nickname);
-                                                remove_user(&server_inner, &nickname, &mut stream);
-                                                break;
-                                            }
-                                            Ok(size) => {
-                                                let cmd_bytes: &[u8] = &buf_in[0..1];
-                                                let param_bytes: &[u8] = &buf_in[1..size];
+                                match stream.read(&mut buf_in) {
+                                    Ok(0) => {
+                                        println!(
+                                            "IP {} has closed the connection",
+                                            stream.peer_addr().unwrap().to_string()
+                                        );
+                                    }
+                                    Ok(size) => {
+                                        let cmd_bytes: &[u8] = &buf_in[0..1];
+                                        let param_bytes: &[u8] = &buf_in[1..size];
+                                        if cmd_bytes[0] == codes::client::REGISTER_NICK {
+                                            nickname =
+                                                String::from_utf8_lossy(param_bytes).to_string();
+                                            register_nick(&server_inner, &nickname, &mut stream);
+                                            loop {
+                                                match stream.read(&mut buf_in) {
+                                                    Ok(0) => {
+                                                        println!("IP {} with nickname {} has closed the connection", stream.peer_addr().unwrap().to_string(), nickname);
+                                                        remove_user(
+                                                            &server_inner,
+                                                            &nickname,
+                                                            &mut stream,
+                                                        );
+                                                        break;
+                                                    }
+                                                    Ok(size) => {
+                                                        let cmd_bytes: &[u8] = &buf_in[0..1];
+                                                        let param_bytes: &[u8] = &buf_in[1..size];
 
-                                                handle_client(
-                                                    &server_inner,
-                                                    &mut stream,
-                                                    &nickname,
-                                                    cmd_bytes,
-                                                    param_bytes,
-                                                );
+                                                        handle_client(
+                                                            &server_inner,
+                                                            &mut stream,
+                                                            &nickname,
+                                                            cmd_bytes,
+                                                            param_bytes,
+                                                        );
+                                                    }
+                                                    Err(_) => {
+                                                        eprintln!("Error parsing client");
+                                                        stream.write(&[codes::QUIT]).unwrap();
+                                                        break;
+                                                    }
+                                                }
                                             }
-                                            Err(_) => {
-                                                eprintln!("Error parsing client");
-                                                stream.write(&[codes::QUIT]).unwrap();
-                                                break;
-                                            }
+                                        } else {
+                                            stream
+                                                .write_all(&[
+                                                    codes::ERROR,
+                                                    codes::error::NOT_YET_REGISTERED,
+                                                ])
+                                                .unwrap();
                                         }
                                     }
-                                } else {
-                                    stream
-                                        .write_all(&[
-                                            codes::ERROR,
-                                            codes::error::NOT_YET_REGISTERED,
-                                        ])
-                                        .unwrap();
+                                    Err(_) => {
+                                        eprintln!("Error parsing client");
+                                        stream.write(&[codes::QUIT]).unwrap();
+                                    }
                                 }
-                            }
-                            Err(_) => {
-                                eprintln!("Error parsing client");
-                                stream.write(&[codes::QUIT]).unwrap();
-                            }
+                            });
                         }
-                    });
+                        Err(_) => {
+                            eprintln!("Error accepting connections!");
+                        }
+                    }
                 }
-                Err(_) => {
-                    eprintln!("Error accepting connections!");
+            });
+
+            // Main Menu Loop on the main thread.
+            loop {
+                println!("0: Quit Server");
+                println!("1: list connected users");
+                println!("2: list rooms");
+                println!("3: Broadcast message to all");
+                println!("4: Freeze server via double lock (for testing)");
+                let inp: String = input!("");
+                match inp.parse::<u8>() {
+                    Ok(num) => match num {
+                        0 => {
+                            println!("Stopping Server");
+                            disconnect_all(&server);
+                            break;
+                        }
+                        1 => println!("Users: {:?}", server.lock().unwrap().users),
+                        2 => println!("Rooms: {:?}", server.lock().unwrap().rooms),
+                        3 => {
+                            let inp2 = input!("Enter message: ");
+                            broadcast(codes::client::MESSAGE, &server, &inp2);
+                        }
+                        4 => {
+                            let s1 = server.lock().unwrap();
+                            let s2 = server.lock().unwrap();
+                        }
+                        _ => println!("Invalid Input"),
+                    },
+                    Err(_) => {
+                        println!("Invalid input");
+                    }
                 }
             }
         }
-    });
-
-    // Main Menu Loop on the main thread.
-    loop {
-        println!("0: Quit Server");
-        println!("1: list connected users");
-        println!("2: list rooms");
-        println!("3: Broadcast message to all");
-        println!("4: Freeze server via double lock (for testing)");
-        let inp: String = input!("");
-        match inp.parse::<u8>() {
-            Ok(num) => match num {
-                0 => {
-                    println!("Stopping Server");
-                    disconnect_all(&server);
-                    break;
-                }
-                1 => println!("Users: {:?}", server.lock().unwrap().users),
-                2 => println!("Rooms: {:?}", server.lock().unwrap().rooms),
-                3 => {
-                    let inp2 = input!("Enter message: ");
-                    broadcast(codes::client::MESSAGE, &server, &inp2);
-                }
-                4 => {
-                    let s1 = server.lock().unwrap();
-                    let s2 = server.lock().unwrap();
-                }
-                _ => println!("Invalid Input"),
-            },
-            Err(_) => {
-                println!("Invalid input");
-            }
+        Err(_) => {
+            eprintln!("Failed to bind port. Try again");
         }
     }
 }

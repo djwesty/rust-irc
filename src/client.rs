@@ -162,8 +162,8 @@ pub fn start() {
         }
     }
 
-    // let host: String = input!("Enter the server host: ");
-    let host: &str = "fab04.cecs.pdx.edu";
+    let host: String = input!("Enter the server host: ");
+    // let host: &str = "fab04.cecs.pdx.edu"; //hard coded host for testing
 
     if let Ok(mut stream) = TcpStream::connect(host.to_owned() + ":6667") {
         println!("Connected to {}", host);
