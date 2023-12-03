@@ -160,7 +160,6 @@ pub fn start() {
     }
 
     let host: String = input!("Enter the server host: ");
-    // let host: &str = "fab04.cecs.pdx.edu"; //hard coded host for testing
 
     if let Ok(mut stream) = TcpStream::connect(host.to_owned() + ":6667") {
         println!("Connected to {}.  /help to see available commands", host);
@@ -232,9 +231,7 @@ pub fn start() {
                             eprintln!("Usage: /msg [room] [message]");
                         }
                     },
-                    _ => {
-                        eprintln!("Malformed command. Try /help");
-                    }
+                    _ => one_param_op(codes::MESSAGE, &mut stream, &inp),
                 },
 
                 _ => match inp.as_str() {
