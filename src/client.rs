@@ -7,7 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 fn no_param_op(opcode: u8, stream: &mut TcpStream) {
-    stream.write(&[opcode]).unwrap();
+    stream.write_all(&[opcode]).unwrap();
 }
 
 fn one_param_op(opcode: u8, stream: &mut TcpStream, param: &str) {
@@ -18,7 +18,7 @@ fn one_param_op(opcode: u8, stream: &mut TcpStream, param: &str) {
     for i in 1..param.len() + 1 {
         out_buf[i] = *param.as_bytes().get(i - 1).unwrap();
     }
-    stream.write(&out_buf).unwrap();
+    stream.write_all(&out_buf).unwrap();
 }
 
 fn two_param_op(opcode: u8, stream: &mut TcpStream, param0: &str, param1: &str) {
@@ -37,7 +37,7 @@ fn two_param_op(opcode: u8, stream: &mut TcpStream, param0: &str, param1: &str) 
         out_buf[byte] = *param1.as_bytes().get(i).unwrap();
         byte += 1;
     }
-    stream.write(&out_buf).unwrap();
+    stream.write_all(&out_buf).unwrap();
 }
 
 fn read_messages(mut stream: TcpStream, nick: &str, timestamp: &mut Arc<Mutex<Instant>>) {
@@ -94,8 +94,8 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
         }
         codes::MESSAGE_ROOM => {
             let params = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
-            match params.split_once(" ") {
-                Some((room, remainder)) => match remainder.split_once(" ") {
+            match params.split_once(' ') {
+                Some((room, remainder)) => match remainder.split_once(' ') {
                     Some((user, msg)) => {
                         if user != nick {
                             println!("[{}]:[{}]: {}", room, user, msg);
@@ -150,7 +150,7 @@ pub fn start() {
     let mut nick: String;
     loop {
         nick = input!("Enter your nickname : ");
-        if nick.contains(" ") {
+        if nick.contains(' ') {
             println!("May not contain spaces . Try again");
         } else if nick.is_empty() {
             println!("May not be empty . Try again");
@@ -196,9 +196,9 @@ pub fn start() {
         loop {
             let inp: String = input!("");
 
-            match inp.split_once(" ") {
+            match inp.split_once(' ') {
                 Some((cmd, param)) => match cmd {
-                    "/list" => match param.split_once(" ") {
+                    "/list" => match param.split_once(' ') {
                         Some((_, _)) => {
                             eprintln!("Malformaed. Try /list [room-name]");
                         }
@@ -206,7 +206,7 @@ pub fn start() {
                             one_param_op(codes::LIST_USERS_IN_ROOM, &mut stream, param);
                         }
                     },
-                    "/join" => match param.split_once(" ") {
+                    "/join" => match param.split_once(' ') {
                         Some((_, _)) => {
                             eprintln!("Malformed. Try /join [room-name]");
                         }
@@ -215,7 +215,7 @@ pub fn start() {
                         }
                     },
 
-                    "/leave" => match param.split_once(" ") {
+                    "/leave" => match param.split_once(' ') {
                         Some((_, _)) => {
                             eprintln!("Malformed. Try /leave [room-name]");
                         }
@@ -223,7 +223,7 @@ pub fn start() {
                             one_param_op(codes::LEAVE_ROOM, &mut stream, param);
                         }
                     },
-                    "/msg" => match param.split_once(" ") {
+                    "/msg" => match param.split_once(' ') {
                         Some((room, msg)) => {
                             two_param_op(codes::MESSAGE_ROOM, &mut stream, room, msg);
                         }

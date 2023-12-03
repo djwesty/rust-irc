@@ -79,7 +79,7 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
                         match recipient_stream {
                             Some(str) => {
                                 println!("Sending msg {:?}", out_buf.to_ascii_lowercase());
-                                str.write_all(&out_buf).unwrap();
+                                str.write_all(out_buf).unwrap();
                             }
                             None => {
                                 eprintln!("Server error: could not find user");
@@ -123,7 +123,7 @@ fn disconnect_all(server: &Arc<Mutex<Server>>) {
     let users: std::collections::hash_map::ValuesMut<'_, String, TcpStream> =
         guard.users.values_mut();
     users.for_each(|user: &mut TcpStream| {
-        user.write(&[codes::QUIT]).unwrap();
+        user.write_all(&[codes::QUIT]).unwrap();
         user.shutdown(std::net::Shutdown::Both).unwrap();
     })
 }
@@ -146,22 +146,22 @@ fn handle_client(
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
             let mut buf_out: Vec<u8> = Vec::new();
             buf_out.extend_from_slice(&[codes::RESPONSE]);
-            for (room, _user) in &unlocked_server.rooms {
+            for room in unlocked_server.rooms.keys() {
                 buf_out.extend_from_slice(room.as_bytes());
                 buf_out.extend_from_slice(SPACE_BYTES);
             }
-            stream.write(&buf_out).unwrap();
+            stream.write_all(&buf_out).unwrap();
         }
 
         codes::LIST_USERS => {
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
             let mut buf_out: Vec<u8> = Vec::new();
             buf_out.extend_from_slice(&[codes::RESPONSE]);
-            for (user, _) in &unlocked_server.users {
+            for user in unlocked_server.users.keys() {
                 buf_out.extend_from_slice(user.as_bytes());
                 buf_out.extend_from_slice(SPACE_BYTES);
             }
-            stream.write(&buf_out).unwrap();
+            stream.write_all(&buf_out).unwrap();
         }
 
         codes::LIST_USERS_IN_ROOM => {
@@ -188,22 +188,22 @@ fn handle_client(
         codes::JOIN_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Vec<&str> = p.split_whitespace().collect();
-            let room = params.get(0).unwrap();
-            join_room(server, &nickname, room, stream);
+            let room = params.first().unwrap();
+            join_room(server, nickname, room, stream);
         }
 
         codes::LEAVE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
             let params: Vec<&str> = p.split_whitespace().collect();
-            let room = params.get(0).unwrap();
-            leave_room(server, &nickname, room, stream);
+            let room = params.first().unwrap();
+            leave_room(server, nickname, room, stream);
         }
 
         //Generic message sent to all users of all rooms the clients nickname is in, except the client nickname
         codes::MESSAGE => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
 
-            message_all_senders_rooms(server, &nickname, &p, stream);
+            message_all_senders_rooms(server, nickname, &p, stream);
             stream.write_all(&[codes::RESPONSE_OK]).unwrap();
         }
 
@@ -214,20 +214,20 @@ fn handle_client(
         //A message sent just to the users of the room passed in, except the client nickname
         codes::MESSAGE_ROOM => {
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
-            let params: Option<(&str, &str)> = p.split_once(" ");
+            let params: Option<(&str, &str)> = p.split_once(' ');
             match params {
                 Some((room, msg)) => {
                     message_room(room, msg, nickname, server);
                 }
                 _ => {
                     stream
-                        .write(&[codes::ERROR, codes::error::MALFORMED])
+                        .write_all(&[codes::ERROR, codes::error::MALFORMED])
                         .unwrap();
                 }
             }
         }
         codes::QUIT => {
-            remove_user(server, nickname, stream);
+            remove_user(server, nickname);
         }
         _ => {
             #[cfg(debug_assertions)]
@@ -238,6 +238,7 @@ fn handle_client(
     // }
 }
 
+/// Send a message to all of the rooms the given sender has joined.
 fn message_all_senders_rooms(
     server: &Arc<Mutex<Server>>,
     sender: &str,
@@ -265,7 +266,7 @@ fn message_all_senders_rooms(
 
         for user in users {
             if !user.eq(sender) {
-                let stream = guard.users.get_mut(&user);
+                let stream: Option<&mut TcpStream> = guard.users.get_mut(&user);
                 stream.unwrap().write_all(out_buf).unwrap();
             }
         }
@@ -274,10 +275,10 @@ fn message_all_senders_rooms(
 }
 
 /// Remove a user from any rooms they may be in, then drop the user
-fn remove_user(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpStream) {
+fn remove_user(server: &Arc<Mutex<Server>>, nickname: &str) {
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
-    let mut rooms: &mut HashMap<String, Vec<String>> = &mut server.rooms;
+    let rooms: &mut HashMap<String, Vec<String>> = &mut server.rooms;
     rooms.values_mut().for_each(|room: &mut Vec<String>| {
         room.retain(|u: &String| !u.eq(nickname));
     });
@@ -311,7 +312,7 @@ fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut T
 
     match unlocked_server.rooms.get_mut(room) {
         Some(l) => {
-            for ele in l.into_iter() {
+            for ele in l.iter_mut() {
                 if ele == user {
                     stream
                         .write_all(&[codes::ERROR, codes::error::ALREADY_IN_ROOM])
@@ -344,7 +345,7 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
         Some(l) => {
             let before_len: usize = l.len();
             l.retain(|item: &String| item != user);
-            if l.len() == 0 {
+            if l.is_empty() {
                 unlocked_server.rooms.remove(room);
                 drop(unlocked_server);
                 let rooms: Vec<String> = get_rooms_of_user(server, user);
@@ -413,15 +414,12 @@ pub fn start() {
 
                             thread::spawn(move || {
                                 let nickname: String;
-                                println!(
-                                    "IP {} has connected",
-                                    stream.peer_addr().unwrap().to_string()
-                                );
+                                println!("IP {} has connected", stream.peer_addr().unwrap());
                                 match stream.read(&mut buf_in) {
                                     Ok(0) => {
                                         println!(
                                             "IP {} has closed the connection",
-                                            stream.peer_addr().unwrap().to_string()
+                                            stream.peer_addr().unwrap()
                                         );
                                     }
                                     Ok(size) => {
@@ -434,12 +432,8 @@ pub fn start() {
                                             loop {
                                                 match stream.read(&mut buf_in) {
                                                     Ok(0) => {
-                                                        println!("IP {} with nickname {} has closed the connection", stream.peer_addr().unwrap().to_string(), nickname);
-                                                        remove_user(
-                                                            &server_inner,
-                                                            &nickname,
-                                                            &mut stream,
-                                                        );
+                                                        println!("IP {} with nickname {} has closed the connection", stream.peer_addr().unwrap(), nickname);
+                                                        remove_user(&server_inner, &nickname);
                                                         break;
                                                     }
                                                     Ok(size) => {
@@ -456,7 +450,7 @@ pub fn start() {
                                                     }
                                                     Err(_) => {
                                                         eprintln!("Error parsing client");
-                                                        stream.write(&[codes::QUIT]).unwrap();
+                                                        stream.write_all(&[codes::QUIT]).unwrap();
                                                         break;
                                                     }
                                                 }
@@ -472,7 +466,7 @@ pub fn start() {
                                     }
                                     Err(_) => {
                                         eprintln!("Error parsing client");
-                                        stream.write(&[codes::QUIT]).unwrap();
+                                        stream.write_all(&[codes::QUIT]).unwrap();
                                     }
                                 }
                             });
@@ -506,8 +500,8 @@ pub fn start() {
                             broadcast(codes::MESSAGE, &server, &inp2);
                         }
                         4 => {
-                            let s1 = server.lock().unwrap();
-                            let s2 = server.lock().unwrap();
+                            let _s1: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+                            let _s2: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
                         }
                         _ => println!("Invalid Input"),
                     },
