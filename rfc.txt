@@ -184,8 +184,8 @@ Table of Contents
 5.2.7 Leaving a that does not exist
 	The server will respond INVALID_ROOM
 
-
 6. Conclusion
+
 6.1. Limitations/Omissions
 	This IRC implementation knowingly omits useful features that mainstream IRC implements, for the sake of simplicity. These include (but are not limited to) the following:
 	Private messages between users

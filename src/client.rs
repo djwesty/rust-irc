@@ -146,7 +146,7 @@ fn help() {
 
 pub fn start() {
     clear();
-    println!("Starting the IRC client. No spaces allowed in nicknames or room names. /help to see available commands");
+    println!("Starting the IRC client. No spaces allowed in nicknames or room names.");
     let mut nick: String;
     loop {
         nick = input!("Enter your nickname : ");
@@ -163,7 +163,7 @@ pub fn start() {
     // let host: &str = "fab04.cecs.pdx.edu"; //hard coded host for testing
 
     if let Ok(mut stream) = TcpStream::connect(host.to_owned() + ":6667") {
-        println!("Connected to {}", host);
+        println!("Connected to {}.  /help to see available commands", host);
 
         //another stream for reading messages
         let reader_clone: TcpStream = stream.try_clone().expect("Failed to clone stream");
