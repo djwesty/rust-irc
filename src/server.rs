@@ -1,5 +1,7 @@
+use std::borrow::BorrowMut;
 use std::ops::DerefMut;
 use std::sync::{Arc, Mutex};
+use std::vec;
 use std::{
     collections::HashMap,
     io::{Read, Write},
@@ -30,9 +32,9 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
 
-    //1: Make sure specified rooms exists, ifn error
-    //2: Make sure sender is a member of the room, ifn error
-    //3: Message all non-sender users in the room the message, ifnone error empty room
+    //1: Make sure specified rooms exists, if not -> error
+    //2: Make sure sender is a member of the room, if not -> error
+    //3: Message all non-sender users in the room the message, if none -> error empty room
     //4: Message the sender RESPONSE_OK
     let room_users: Option<&Vec<String>> = server.rooms.get(room);
     let mut sender_stream = server
@@ -43,7 +45,7 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
         .expect("Clone issue");
     match room_users {
         Some(users) => {
-            let mut is_member = false;
+            let mut is_member: bool = false;
             for user in users {
                 if user.eq(sender) {
                     is_member = true;
@@ -70,13 +72,13 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
                 }
             } else {
                 sender_stream
-                    .write_all(&[codes::ERROR, codes::error::NOT_IN_ROOM])
+                    .write_all(&two_op_buf(codes::ERROR, codes::error::NOT_IN_ROOM))
                     .unwrap();
             }
         }
         None => {
             sender_stream
-                .write_all(&[codes::ERROR, codes::error::EMPTY_ROOM])
+                .write_all(&two_op_buf(codes::ERROR, codes::error::EMPTY_ROOM))
                 .unwrap();
         }
     }
@@ -231,16 +233,58 @@ fn message_all_senders_rooms(
     }
 }
 
-/// Remove a user from any rooms they may be in, then drop the user
+/// Remove a user from any rooms they may be in, then drop the user. Drop the room if it became empty
 fn remove_user(server: &Arc<Mutex<Server>>, nickname: &str) {
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
     let rooms: &mut HashMap<String, Vec<String>> = &mut server.rooms;
-    rooms.values_mut().for_each(|room: &mut Vec<String>| {
-        room.retain(|u: &String| !u.eq(nickname));
+    let mut empty_rooms: Vec<String> = vec![];
+    rooms.iter_mut().for_each(|(room, users)| {
+        users.retain(|u: &String| !u.eq(nickname));
+        if users.is_empty() {
+            empty_rooms.push(room.to_string());
+        }
     });
+    for room in empty_rooms {
+        rooms.remove(&room);
+    }
     let users: &mut HashMap<String, TcpStream> = &mut server.users;
     users.remove(nickname);
+}
+
+#[test]
+fn test_remove_user() {
+    let socket: Result<TcpListener, std::io::Error> =
+        TcpListener::bind("0.0.0.0:".to_string() + &DEFAULT_PORT.to_string());
+    match socket {
+        Ok(_) => {
+            let stream: Result<TcpStream, std::io::Error> =
+                TcpStream::connect("0.0.0.0:".to_string() + &DEFAULT_PORT.to_string());
+            match stream {
+                Ok(stream) => {
+                    let server_arc: Arc<Mutex<Server>> = Arc::new(Mutex::new(Server::new()));
+                    let mut guard: std::sync::MutexGuard<'_, Server> = server_arc.lock().unwrap();
+                    guard.users.insert("david".to_string(), stream);
+                    guard
+                        .rooms
+                        .insert("cat".to_string(), vec!["david".to_string()]);
+                    assert!(guard.rooms.contains_key("cat"));
+                    assert!(guard.users.contains_key("david"));
+                    drop(guard);
+                    remove_user(&server_arc, "david");
+                    let guard: std::sync::MutexGuard<'_, Server> = server_arc.lock().unwrap();
+                    assert!(guard.rooms.is_empty());
+                    assert!(guard.users.is_empty());
+                }
+                _ => {
+                    eprintln!("Test issue. Check port 6667 is free");
+                }
+            }
+        }
+        Err(_) => {
+            eprintln!("Test issue. Check port 6667 is free");
+        }
+    }
 }
 
 /// Add a nickname to the Server, being careful to handle a possible collision.
@@ -366,11 +410,11 @@ pub fn start() {
 
                             thread::spawn(move || {
                                 let nickname: String;
-                                println!("IP {} has connected", stream.peer_addr().unwrap());
+                                println!("{} has connected", stream.peer_addr().unwrap());
                                 match stream.read(&mut buf_in) {
                                     Ok(0) => {
                                         println!(
-                                            "IP {} has closed the connection",
+                                            "{} has closed the connection",
                                             stream.peer_addr().unwrap()
                                         );
                                     }
@@ -384,7 +428,7 @@ pub fn start() {
                                             loop {
                                                 match stream.read(&mut buf_in) {
                                                     Ok(0) => {
-                                                        println!("IP {} with nickname {} has closed the connection", stream.peer_addr().unwrap(), nickname);
+                                                        println!("{} with nickname {} has closed the connection", stream.peer_addr().unwrap(), nickname);
                                                         remove_user(&server_inner, &nickname);
                                                         break;
                                                     }

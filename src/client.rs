@@ -83,7 +83,8 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
 
         codes::RESPONSE_OK => {}
         codes::RESPONSE => {
-            let message = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
+            let message: String =
+                String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
             println!("{}", message);
         }
         codes::QUIT => {
@@ -113,6 +114,10 @@ fn help() {
     );
 }
 
+/// Client application: prompt user for nickname and host
+/// On a new thread, try to open a tcp connection to given host, and register nickname first
+/// After registring the nickname, main loop to take in, parse, and send user commands
+/// Also, spawn a new thread as a watchdog for possible unresponsive server
 pub fn start() {
     clear();
     println!("Starting the IRC client. No spaces allowed in nicknames or room names.");

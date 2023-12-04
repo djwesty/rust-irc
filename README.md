@@ -1,12 +1,6 @@
 # rust-irc
 This a simple irc-like client and server application in rust, and libraries to support them both
 
-
-## Table of Contents
-* Background
-* Installation
-* Basic Usage
-
 ## Background
 `rust-irc` is both a custom irc-like protocol running on TCP, as well as a reference implementation of client and server application. In short, a server instance will listen for an uncapped number of clients to connect, and provides some simple abilities to see rooms and users, as well as logging connections. Client instances may specify the host to connect to and attempt to register a nickname. After successful registration, clients may create/join rooms, list users, rooms, and users in rooms, and send messages to either all joined rooms or any particular joined room. 
 
@@ -53,7 +47,7 @@ A simple entry-point which will look for the `s` or `c` command line argument to
 ## Building/ Running
 It is required to install the [rustup rust toolchain](https://rustup.rs/)
 
-The following commands are tested to build and run the application on GNU+Linux, and may also work on MacOs. Windows instructions may differ slightly and are not provided.
+The following commands are tested to build and run the application on GNU+Linux, and may also work on MacOS. Windows instructions may differ slightly and are not provided.
 
 To run the client in debug mode
 ```bash
@@ -73,6 +67,46 @@ cargo build --release
 Note: Server applications behind NAT may require forwarding of port 6667 TCP to the host.
 
 ## Testing
+Testing for this application was done through a combination of manual end-to-end tests and coded unit tests.
+
+### Manual End-to-End tests
+Manual end-to-end tests that I have performed provide the most confidence. Taking advantage of the PSU CAT resources, my testing flow was as follows.
+
+#### Client side end-to-end
+1) The the server on my local machine in the lab (fab02.cecs.pdx.edu);
+2) SSH into 4 seperate clients on the local network (ada, babbage, rita, ruby)
+3) Start each client and connect to my server on fab02 with unique nicknames (westy, easty, northy, southy)
+4) Have all four clients `/join cat`
+5) Have 2 clients also `/join dog` (easty, westy)
+6) Test that easty and westy can `/msg dog` and only the other users gets the message
+7) Test easty and westy send messages to both `cat` and `dog` when sent in general, ensuring that only the other sees the `dog` room messages, and the 3 other users see the `cat` room messages
+8) Test that northy and southy cannot `/msg dog [some message]`
+9) Test that northy and southy cannot `/leave dog`
+10) Test `/rooms` and `/users` on all clients for expected output
+11) Test that a 5th client cannot connect with a duplicate nickname (westy again)
+12) Test that all users may `/leave cat` and westy and easty may `/leave dog`, only once
+13) Test `/help` message appears
+14) Test `/quit` is graceful
+15) Test the client side watchdog by running command `4` on the server, having the client send a message and awaiting the client to stop for non-responsiveness.
+#### Server side end-to-end
+Here, I run the server and have 4 clients connect and join rooms, as in step 1-5 above. Then I test.
+1) Test command `1` to see that all 4 users appears
+2) Test command `2` to see that all 4 users are in `cat` and westy and easty are in `dog`
+3) Test command `3` to see that 'hello world' sent from the server is received by all clients
+4) Test command `0` stops the server and gracefully disconnects the clients.
+
+### Coded Unit tests
+Coded unit tests are provided for my buffer helper functions and can be found in `tests/test_lib.rs`. I also include an additional test for  `fn remove_user()` in `server.rs`.
+
+I consider my included coded unit tests to be less than adequate and I attribute this to a few reasons. Both the client and server applications rely heavily on buffered reads and writes in every function, whether they be reads from stdin or tpcstream, or writes to stdout or tcpstream. The following work-arounds to this issue were explored but not implemented
+1) Re-factor my entire project to use [`Cursor`](https://doc.rust-lang.org/std/io/struct.Cursor.html) as an abstraction layer to facilitate testing
+* This would straightforwardly solve my issue of writing tests for function which take buffers as parameters (or could take buffers, in the case of stdin/stdout). However, I cannot not do this given the effort involved and time restrictions. My situation is a good argument for the test-driven-development paradigm; had I written my tests first, I would have been forced to use `Cursor` from the start.
+2) Use a crate like `captured-output` or `gag` to capture stdout and test it
+* This would solve 1/4 of the cases listed but since it's not a holistic solution, I'd rather not being in a new external crate *just* for this.
+3) use `std::io::set_output_capture` to test stdout
+* Again this would solve 1/4 of the cases and looks good as it's in the standard library. However, this is a nightly feature and internet research suggests against using this for stability reasons.
+4) Create a mock/dummy TCP listener/ TCP Stream for tests
+* Creating a true dummy or mock TCP listener would take some development efforts, not help me with stdout/stdin testing and at that point, I would go back to consider `Cursor`. As a 'quicker' solution in my test for `fn remove_user()` I use a real TCPStream to localhost:6667; this works as its just a placeholder object and not the focus of my test. This is not a reliable approach from an operating system and concurrency perspective, but perhaps I could use `unsafe` raw pointers or refactor my `Server` struct to contain an `Option<TCPStream>` to continue to explore this type of testing further. 
 
 ## Example with 3 machines
 
@@ -98,7 +132,7 @@ Enter your nickname : westy
 Enter the server host
 ```
 Enter the server host: 192.168.0.3
-Connected to localhost
+Connected to 192.168.0.3:6667
 ```
 
 Join a room (cat)
@@ -122,6 +156,7 @@ Enter your nickname : easty
 Enter the server host
 ```
 Enter the server host: 192.168.0.3
+Connected to 192.168.0.3:6667
 ```
 
 Join the same room (cat)
