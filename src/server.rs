@@ -11,7 +11,6 @@ use prompted::input;
 use rust_irc::buf_helpers::{one_op_buf, one_param_buf, three_param_buf, two_op_buf};
 use rust_irc::{clear, codes, DEFAULT_PORT};
 
-#[derive(Debug)]
 struct Server {
     users: HashMap<String, TcpStream>,
     rooms: HashMap<String, Vec<String>>,
