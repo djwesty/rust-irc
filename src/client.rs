@@ -69,6 +69,7 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
             }
             codes::error::NICKNAME_COLLISION => {
                 eprintln!("Nickname already in use on server. Connect again with a different one");
+                std::process::exit(1);
             }
             codes::error::SERVER_FULL => {
                 eprintln!("Server is full. Try again later");
@@ -102,11 +103,11 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
                         }
                     }
                     None => {
-                        eprintln!("Malformed message recieved");
+                        eprintln!("Malformed message recieved: {}", params);
                     }
                 },
                 None => {
-                    eprintln!("Malformed message recieved");
+                    eprintln!("Malformed message recieved: {}", params);
                 }
             }
         }

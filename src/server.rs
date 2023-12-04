@@ -8,7 +8,7 @@ use std::{
 };
 
 use prompted::input;
-use rust_irc::{clear, codes, SPACE_BYTES};
+use rust_irc::{clear, codes, one_op_buf, one_param_buf, three_param_buf, two_op_buf};
 
 const SERVER_ADDRESS: &str = "0.0.0.0:6667";
 
@@ -28,20 +28,7 @@ impl Server {
 }
 
 fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>) {
-    let code_bytes = &[codes::MESSAGE_ROOM];
-    let room_bytes = room.as_bytes();
-    let msg_bytes = msg.as_bytes();
-    let sender_bytes = sender.as_bytes();
-    let out_buf: &Vec<u8> = &[
-        code_bytes,
-        room_bytes,
-        SPACE_BYTES,
-        sender_bytes,
-        SPACE_BYTES,
-        msg_bytes,
-    ]
-    .concat();
-
+    let out_buf: Vec<u8> = three_param_buf(codes::MESSAGE_ROOM, room, sender, msg);
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let server: &mut Server = guard.deref_mut();
 
@@ -49,7 +36,6 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
     //2: Make sure sender is a member of the room, ifn error
     //3: Message all non-sender users in the room the message, ifnone error empty room
     //4: Message the sender RESPONSE_OK
-    println!("checking room {} ", room);
     let room_users: Option<&Vec<String>> = server.rooms.get(room);
     let mut sender_stream = server
         .users
@@ -72,14 +58,16 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
                 for user in users {
                     if user.eq(sender) {
                         //4
-                        sender_stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+                        sender_stream
+                            .write_all(&one_op_buf(codes::RESPONSE_OK))
+                            .unwrap();
                     } else {
                         //3
                         let recipient_stream: Option<&mut TcpStream> = server.users.get_mut(user);
                         match recipient_stream {
                             Some(str) => {
                                 println!("Sending msg {:?}", out_buf.to_ascii_lowercase());
-                                str.write_all(out_buf).unwrap();
+                                str.write_all(&out_buf).unwrap();
                             }
                             None => {
                                 eprintln!("Server error: could not find user");
@@ -102,14 +90,7 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
 }
 
 fn broadcast(op: u8, server: &Arc<Mutex<Server>>, message: &str) {
-    let size: usize = message.len() + 1;
-    let mut out_buf: Vec<u8> = vec![0; size];
-    out_buf[0] = op;
-
-    for i in 1..size {
-        out_buf[i] = *message.as_bytes().get(i - 1).unwrap();
-    }
-
+    let out_buf: Vec<u8> = one_param_buf(op, message);
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let streams: std::collections::hash_map::ValuesMut<'_, String, TcpStream> =
         unlocked_server.users.values_mut();
@@ -123,11 +104,11 @@ fn disconnect_all(server: &Arc<Mutex<Server>>) {
     let users: std::collections::hash_map::ValuesMut<'_, String, TcpStream> =
         guard.users.values_mut();
     users.for_each(|user: &mut TcpStream| {
-        user.write_all(&[codes::QUIT]).unwrap();
+        user.write_all(&one_op_buf(codes::QUIT)).unwrap();
         user.shutdown(std::net::Shutdown::Both).unwrap();
     })
 }
-
+/// Handle possible user commands from the client
 fn handle_client(
     server: &Arc<Mutex<Server>>,
     stream: &mut TcpStream,
@@ -135,52 +116,49 @@ fn handle_client(
     cmd_bytes: &[u8],
     param_bytes: &[u8],
 ) {
-    // handle user commands
     match cmd_bytes[0] {
         codes::REGISTER_NICK => {
-            stream
-                .write_all(&[codes::ERROR, codes::error::ALREADY_REGISTERED])
-                .unwrap();
+            let buf_out: [u8; 2] = two_op_buf(codes::ERROR, codes::error::ALREADY_REGISTERED);
+            stream.write_all(&buf_out).unwrap();
         }
         codes::LIST_ROOMS => {
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-            let mut buf_out: Vec<u8> = Vec::new();
-            buf_out.extend_from_slice(&[codes::RESPONSE]);
+            let mut rooms: String = String::new();
             for room in unlocked_server.rooms.keys() {
-                buf_out.extend_from_slice(room.as_bytes());
-                buf_out.extend_from_slice(SPACE_BYTES);
+                rooms.push_str(room);
+                rooms.push(' ');
             }
+            let buf_out: Vec<u8> = one_param_buf(codes::RESPONSE, &rooms);
             stream.write_all(&buf_out).unwrap();
         }
 
         codes::LIST_USERS => {
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-            let mut buf_out: Vec<u8> = Vec::new();
-            buf_out.extend_from_slice(&[codes::RESPONSE]);
+            let mut users: String = String::new();
             for user in unlocked_server.users.keys() {
-                buf_out.extend_from_slice(user.as_bytes());
-                buf_out.extend_from_slice(SPACE_BYTES);
+                users.push_str(user);
+                users.push(' ');
             }
+            let buf_out: Vec<u8> = one_param_buf(codes::RESPONSE, &users);
             stream.write_all(&buf_out).unwrap();
         }
 
         codes::LIST_USERS_IN_ROOM => {
             let room: String = String::from_utf8_lossy(param_bytes).to_string();
             let unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-            let mut buf_out: Vec<u8> = Vec::new();
-            buf_out.extend_from_slice(&[codes::RESPONSE]);
             match unlocked_server.rooms.get(&room) {
                 Some(l) => {
-                    for ele in l {
-                        buf_out.extend_from_slice(ele.as_bytes());
-                        buf_out.extend_from_slice(SPACE_BYTES);
+                    let mut user_list: String = String::new();
+                    for user in l {
+                        user_list.push_str(user);
+                        user_list.push(' ');
                     }
+                    let buf_out: Vec<u8> = one_param_buf(codes::RESPONSE, &user_list);
                     stream.write_all(&buf_out).unwrap();
                 }
                 None => {
-                    stream
-                        .write_all(&[codes::ERROR, codes::error::INVALID_ROOM])
-                        .unwrap();
+                    let buf_out: [u8; 2] = two_op_buf(codes::ERROR, codes::error::INVALID_ROOM);
+                    stream.write_all(&buf_out).unwrap();
                 }
             }
         }
@@ -204,11 +182,11 @@ fn handle_client(
             let p: String = String::from_utf8_lossy(param_bytes).to_string();
 
             message_all_senders_rooms(server, nickname, &p, stream);
-            stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+            stream.write_all(&one_op_buf(codes::RESPONSE_OK)).unwrap();
         }
 
         codes::KEEP_ALIVE => {
-            stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+            stream.write_all(&one_op_buf(codes::RESPONSE_OK)).unwrap();
         }
 
         //A message sent just to the users of the room passed in, except the client nickname
@@ -247,30 +225,16 @@ fn message_all_senders_rooms(
 ) {
     let rooms: Vec<String> = get_rooms_of_user(server, sender);
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
-    let sender_bytes: &[u8] = sender.as_bytes();
-    let code_bytes: &[u8] = &[codes::MESSAGE_ROOM];
-    let message_bytes: &[u8] = message.as_bytes();
-    let space_bytes: &[u8] = &[0x20];
     for room in rooms {
-        let room_bytes: &[u8] = room.as_bytes();
         let users: Vec<String> = guard.rooms.get(&room).unwrap().clone();
-        let out_buf: &Vec<u8> = &[
-            code_bytes,
-            room_bytes,
-            space_bytes,
-            sender_bytes,
-            space_bytes,
-            message_bytes,
-        ]
-        .concat();
-
+        let out_buf: Vec<u8> = three_param_buf(codes::MESSAGE_ROOM, &room, &sender, &message);
         for user in users {
             if !user.eq(sender) {
                 let stream: Option<&mut TcpStream> = guard.users.get_mut(&user);
-                stream.unwrap().write_all(out_buf).unwrap();
+                stream.unwrap().write_all(&out_buf).unwrap();
             }
         }
-        stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+        stream.write_all(&one_op_buf(codes::RESPONSE_OK)).unwrap();
     }
 }
 
@@ -300,7 +264,7 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
         let addr: String = clone.peer_addr().unwrap().to_string();
 
         unlocked_server.users.insert(nickname.to_string(), clone);
-        stream.write_all(&[codes::RESPONSE_OK]).unwrap();
+        stream.write_all(&one_op_buf(codes::RESPONSE_OK)).unwrap();
         println!("{} has registered nickname {}", addr, nickname);
     }
 }
@@ -309,14 +273,13 @@ fn register_nick(server: &Arc<Mutex<Server>>, nickname: &str, stream: &mut TcpSt
 /// Provide feedback about what room was just joined, and which rooms the user may be in
 fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut TcpStream) {
     let mut unlocked_server: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
+    let err_buf: [u8; 2] = two_op_buf(codes::ERROR, codes::error::ALREADY_IN_ROOM);
 
     match unlocked_server.rooms.get_mut(room) {
         Some(l) => {
             for ele in l.iter_mut() {
                 if ele == user {
-                    stream
-                        .write_all(&[codes::ERROR, codes::error::ALREADY_IN_ROOM])
-                        .unwrap();
+                    stream.write_all(&err_buf).unwrap();
                     return;
                 }
             }
@@ -331,10 +294,8 @@ fn join_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut T
     let rooms: Vec<String> = get_rooms_of_user(server, user);
     let rooms_expanded: String = rooms.join(",");
     let response: String = format!("Joined {}. Current rooms: {}", room, rooms_expanded);
-    let res_bytes: &[u8] = response.as_bytes();
-    let code_bytes: &[u8] = &[codes::RESPONSE];
-    let out: &Vec<u8> = &[code_bytes, res_bytes].concat();
-    stream.write_all(out).unwrap();
+    let out_buf: Vec<u8> = one_param_buf(codes::RESPONSE, &response);
+    stream.write_all(&out_buf).unwrap();
 }
 
 /// Remove a user from a room, handling possible error cases.
@@ -351,29 +312,23 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
                 let rooms: Vec<String> = get_rooms_of_user(server, user);
                 let rooms_expanded: String = rooms.join(",");
                 let response: String = format!("Left {}. Current rooms: {}", room, rooms_expanded);
-                let code_bytes: &[u8] = &[codes::RESPONSE];
-                let res_bytes: &[u8] = response.as_bytes();
-                let out: &Vec<u8> = &[code_bytes, res_bytes].concat();
-                stream.write_all(out).unwrap();
+                let out_buf: Vec<u8> = one_param_buf(codes::RESPONSE, &response);
+                stream.write_all(&out_buf).unwrap();
             } else if l.len() == before_len {
-                stream
-                    .write_all(&[codes::ERROR, codes::error::INVALID_ROOM])
-                    .unwrap();
+                let err_buf: [u8; 2] = two_op_buf(codes::ERROR, codes::error::INVALID_ROOM);
+                stream.write_all(&err_buf).unwrap();
             } else {
                 drop(unlocked_server);
                 let rooms: Vec<String> = get_rooms_of_user(server, user);
                 let rooms_expanded: String = rooms.join(",");
                 let response: String = format!("Left {}. Current rooms: {}", room, rooms_expanded);
-                let code_bytes: &[u8] = &[codes::RESPONSE];
-                let res_bytes: &[u8] = response.as_bytes();
-                let out: &Vec<u8> = &[code_bytes, res_bytes].concat();
-                stream.write_all(out).unwrap();
+                let out_buf: Vec<u8> = one_param_buf(codes::RESPONSE, &response);
+                stream.write_all(&out_buf).unwrap();
             }
         }
         None => {
-            stream
-                .write_all(&[codes::ERROR, codes::error::INVALID_ROOM])
-                .unwrap();
+            let err_buff: [u8; 2] = two_op_buf(codes::ERROR, codes::error::INVALID_ROOM);
+            stream.write_all(&err_buff).unwrap();
         }
     }
 }
@@ -450,23 +405,24 @@ pub fn start() {
                                                     }
                                                     Err(_) => {
                                                         eprintln!("Error parsing client");
-                                                        stream.write_all(&[codes::QUIT]).unwrap();
+                                                        let out_buf: [u8; 1] =
+                                                            one_op_buf(codes::QUIT);
+                                                        stream.write_all(&out_buf).unwrap();
                                                         break;
                                                     }
                                                 }
                                             }
                                         } else {
-                                            stream
-                                                .write_all(&[
-                                                    codes::ERROR,
-                                                    codes::error::NOT_YET_REGISTERED,
-                                                ])
-                                                .unwrap();
+                                            let err_buff: [u8; 2] = two_op_buf(
+                                                codes::ERROR,
+                                                codes::error::NOT_YET_REGISTERED,
+                                            );
+                                            stream.write_all(&err_buff).unwrap();
                                         }
                                     }
                                     Err(_) => {
                                         eprintln!("Error parsing client");
-                                        stream.write_all(&[codes::QUIT]).unwrap();
+                                        stream.write_all(&one_op_buf(codes::QUIT)).unwrap();
                                     }
                                 }
                             });

@@ -33,3 +33,44 @@ pub fn clear() {
 }
 
 pub const SPACE_BYTES: &[u8] = &[0x20];
+
+pub fn one_op_buf(opcode: u8) -> [u8; 1] {
+    [opcode]
+}
+
+pub fn two_op_buf(opcode0: u8, opcode1: u8) -> [u8; 2] {
+    [opcode0, opcode1]
+}
+
+pub fn one_param_buf(opcode: u8, param: &str) -> Vec<u8> {
+    let opcode_buf: &[u8; 1] = &[opcode];
+    let param_buf: &[u8] = param.as_bytes();
+    let out_buf: Vec<u8> = [opcode_buf, param_buf].concat();
+    out_buf
+}
+
+pub fn two_param_buf(opcode: u8, param0: &str, param1: &str) -> Vec<u8> {
+    let opcode_buf: &[u8; 1] = &[opcode];
+    let param0_buf: &[u8] = param0.as_bytes();
+    let param1_buf: &[u8] = param1.as_bytes();
+    let out_buf: Vec<u8> = [opcode_buf, param0_buf, SPACE_BYTES, param1_buf].concat();
+    out_buf
+}
+
+pub fn three_param_buf(opcode: u8, param0: &str, param1: &str, param2: &str) -> Vec<u8> {
+    let opcode_buf: &[u8; 1] = &[opcode];
+    let param0_buf: &[u8] = param0.as_bytes();
+    let param1_buf: &[u8] = param1.as_bytes();
+    let param2_buf: &[u8] = param2.as_bytes();
+
+    let out_buf: Vec<u8> = [
+        opcode_buf,
+        param0_buf,
+        SPACE_BYTES,
+        param1_buf,
+        SPACE_BYTES,
+        param2_buf,
+    ]
+    .concat();
+    out_buf
+}
