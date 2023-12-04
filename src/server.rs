@@ -8,9 +8,8 @@ use std::{
 };
 
 use prompted::input;
-use rust_irc::{
-    clear, codes, one_op_buf, one_param_buf, three_param_buf, two_op_buf, DEFAULT_PORT,
-};
+use rust_irc::buf_helpers::{one_op_buf, one_param_buf, three_param_buf, two_op_buf};
+use rust_irc::{clear, codes, DEFAULT_PORT};
 
 #[derive(Debug)]
 struct Server {
@@ -43,10 +42,8 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
         .unwrap()
         .try_clone()
         .expect("Clone issue");
-    //1
     match room_users {
         Some(users) => {
-            //2
             let mut is_member = false;
             for user in users {
                 if user.eq(sender) {
@@ -57,12 +54,10 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
             if is_member {
                 for user in users {
                     if user.eq(sender) {
-                        //4
                         sender_stream
                             .write_all(&one_op_buf(codes::RESPONSE_OK))
                             .unwrap();
                     } else {
-                        //3
                         let recipient_stream: Option<&mut TcpStream> = server.users.get_mut(user);
                         match recipient_stream {
                             Some(str) => {
@@ -305,18 +300,15 @@ fn leave_room(server: &Arc<Mutex<Server>>, user: &str, room: &str, stream: &mut 
         Some(l) => {
             let before_len: usize = l.len();
             l.retain(|item: &String| item != user);
-            if l.is_empty() {
-                unlocked_server.rooms.remove(room);
-                drop(unlocked_server);
-                let rooms: Vec<String> = get_rooms_of_user(server, user);
-                let rooms_expanded: String = rooms.join(",");
-                let response: String = format!("Left {}. Current rooms: {}", room, rooms_expanded);
-                let out_buf: Vec<u8> = one_param_buf(codes::RESPONSE, &response);
-                stream.write_all(&out_buf).unwrap();
-            } else if l.len() == before_len {
-                let err_buf: [u8; 2] = two_op_buf(codes::ERROR, codes::error::INVALID_ROOM);
+
+            // case when the user was not found to be in the room.
+            if l.len() == before_len {
+                let err_buf: [u8; 2] = two_op_buf(codes::ERROR, codes::error::NOT_IN_ROOM);
                 stream.write_all(&err_buf).unwrap();
             } else {
+                if l.is_empty() {
+                    unlocked_server.rooms.remove(room); //drop the room if this was the last member
+                }
                 drop(unlocked_server);
                 let rooms: Vec<String> = get_rooms_of_user(server, user);
                 let rooms_expanded: String = rooms.join(",");
@@ -350,6 +342,11 @@ fn get_rooms_of_user(server: &Arc<Mutex<Server>>, user: &str) -> Vec<String> {
     result
 }
 
+/// Entrypoint for the server
+/// Main thread -> Main Menu
+/// We spawn one thread to manage the entire TCP incoming process (seperate from main thread)
+/// Each connected IP gets a spawned thread in the `for` loop
+/// Before looping to handle generic client input, we handle the special case of the nickname registration requirnment
 pub fn start() {
     let mut host: String = "0.0.0.0:".to_string();
     host.push_str(&DEFAULT_PORT.to_string());

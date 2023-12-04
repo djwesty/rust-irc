@@ -1,5 +1,6 @@
 use prompted::input;
-use rust_irc::{clear, codes, one_op_buf, one_param_buf, two_param_buf, DEFAULT_PORT};
+use rust_irc::buf_helpers::{one_op_buf, one_param_buf, two_param_buf};
+use rust_irc::{clear, codes, DEFAULT_PORT};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
@@ -43,7 +44,7 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
                 eprintln!("Server is full. Try again later");
             }
             codes::error::NOT_IN_ROOM => {
-                eprintln!("Cannot send a message before joining room. Use /join [room].")
+                eprintln!("Cannot interact with a room you have not joined. Use /join [room].")
             }
             codes::error::EMPTY_ROOM => {
                 eprintln!("Room is Empty");
@@ -200,7 +201,7 @@ pub fn start() {
                     },
                     "/msg" => match param.split_once(' ') {
                         Some((room, msg)) => {
-                            let out_buf = two_param_buf(codes::MESSAGE_ROOM, room, msg);
+                            let out_buf: Vec<u8> = two_param_buf(codes::MESSAGE_ROOM, room, msg);
                             stream.write_all(&out_buf).unwrap();
                         }
                         _ => {
