@@ -1,44 +1,12 @@
 use prompted::input;
-use rust_irc::{clear, codes};
+use rust_irc::{clear, codes, one_op_buf, one_param_buf, two_param_buf, DEFAULT_PORT};
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-fn no_param_op(opcode: u8, stream: &mut TcpStream) {
-    stream.write_all(&[opcode]).unwrap();
-}
-
-fn one_param_op(opcode: u8, stream: &mut TcpStream, param: &str) {
-    let size: usize = param.to_string().capacity() + 1;
-    let mut out_buf: Vec<u8> = vec![0; size];
-    out_buf[0] = opcode;
-
-    for i in 1..param.len() + 1 {
-        out_buf[i] = *param.as_bytes().get(i - 1).unwrap();
-    }
-    stream.write_all(&out_buf).unwrap();
-}
-
-fn two_param_op(opcode: u8, stream: &mut TcpStream, param0: &str, param1: &str) {
-    let size: usize = param0.to_string().capacity() + param1.to_string().capacity() + 2;
-    let mut out_buf: Vec<u8> = vec![0; size];
-    let mut byte: usize = 0;
-    out_buf[byte] = opcode;
-    byte += 1;
-    for i in 0..param0.len() {
-        out_buf[byte] = *param0.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
-    out_buf[byte] = 0x20;
-    byte += 1;
-    for i in 0..param1.len() {
-        out_buf[byte] = *param1.as_bytes().get(i).unwrap();
-        byte += 1;
-    }
-    stream.write_all(&out_buf).unwrap();
-}
+const DEFAULT_HOST: &str = "localhost";
 
 fn read_messages(mut stream: TcpStream, nick: &str, timestamp: &mut Arc<Mutex<Instant>>) {
     let mut buffer: [u8; 1024] = [0; 1024];
@@ -49,7 +17,7 @@ fn read_messages(mut stream: TcpStream, nick: &str, timestamp: &mut Arc<Mutex<In
                 std::process::exit(0);
             }
             Ok(size) => {
-                let mut lock = timestamp.lock().unwrap();
+                let mut lock: std::sync::MutexGuard<'_, Instant> = timestamp.lock().unwrap();
                 *lock = Instant::now();
                 let msg_bytes: &[u8] = &buffer[..size];
                 process_message(msg_bytes, nick);
@@ -94,7 +62,7 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
             println!("[server]:{}", message);
         }
         codes::MESSAGE_ROOM => {
-            let params = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
+            let params: String = String::from_utf8(msg_bytes[1..msg_bytes.len()].to_vec()).unwrap();
             match params.split_once(' ') {
                 Some((room, remainder)) => match remainder.split_once(' ') {
                     Some((user, msg)) => {
@@ -122,8 +90,7 @@ fn process_message(msg_bytes: &[u8], nick: &str) {
             std::process::exit(0);
         }
         _ => {
-            #[cfg(debug_assertions)]
-            println!("BAD RESPONSE = {:x?} ", msg_bytes[0]);
+            eprintln!("BAD RESPONSE = {:x?} ", msg_bytes[0]);
         }
     }
 }
@@ -160,10 +127,14 @@ pub fn start() {
         }
     }
 
-    let host: String = input!("Enter the server host: ");
-
-    if let Ok(mut stream) = TcpStream::connect(host.to_owned() + ":6667") {
-        println!("Connected to {}.  /help to see available commands", host);
+    let mut host: String = input!("Enter the server host (empty for {}): ", DEFAULT_HOST);
+    if host.is_empty() {
+        host = DEFAULT_HOST.to_owned();
+    }
+    host.push(':');
+    host.push_str(&DEFAULT_PORT.to_string());
+    if let Ok(mut stream) = TcpStream::connect(host.to_owned()) {
+        println!("Connected to {}.\n/help to see available commands", host);
 
         //another stream for reading messages
         let reader_clone: TcpStream = stream.try_clone().expect("Failed to clone stream");
@@ -192,8 +163,8 @@ pub fn start() {
         });
 
         //try to register the nickname
-        one_param_op(codes::REGISTER_NICK, &mut stream, &nick);
-
+        let nick_reg_buff: Vec<u8> = one_param_buf(codes::REGISTER_NICK, &nick);
+        stream.write_all(&nick_reg_buff).unwrap();
         loop {
             let inp: String = input!("");
 
@@ -204,7 +175,8 @@ pub fn start() {
                             eprintln!("Malformaed. Try /list [room-name]");
                         }
                         _ => {
-                            one_param_op(codes::LIST_USERS_IN_ROOM, &mut stream, param);
+                            let out_buf: Vec<u8> = one_param_buf(codes::LIST_USERS_IN_ROOM, param);
+                            stream.write_all(&out_buf).unwrap();
                         }
                     },
                     "/join" => match param.split_once(' ') {
@@ -212,7 +184,8 @@ pub fn start() {
                             eprintln!("Malformed. Try /join [room-name]");
                         }
                         _ => {
-                            one_param_op(codes::JOIN_ROOM, &mut stream, param);
+                            let out_buf: Vec<u8> = one_param_buf(codes::JOIN_ROOM, param);
+                            stream.write_all(&out_buf).unwrap();
                         }
                     },
 
@@ -221,18 +194,23 @@ pub fn start() {
                             eprintln!("Malformed. Try /leave [room-name]");
                         }
                         _ => {
-                            one_param_op(codes::LEAVE_ROOM, &mut stream, param);
+                            let out_buf: Vec<u8> = one_param_buf(codes::LEAVE_ROOM, param);
+                            stream.write_all(&out_buf).unwrap();
                         }
                     },
                     "/msg" => match param.split_once(' ') {
                         Some((room, msg)) => {
-                            two_param_op(codes::MESSAGE_ROOM, &mut stream, room, msg);
+                            let out_buf = two_param_buf(codes::MESSAGE_ROOM, room, msg);
+                            stream.write_all(&out_buf).unwrap();
                         }
                         _ => {
                             eprintln!("Usage: /msg [room] [message]");
                         }
                     },
-                    _ => one_param_op(codes::MESSAGE, &mut stream, &inp),
+                    _ => {
+                        let out_buf: Vec<u8> = one_param_buf(codes::MESSAGE, &inp);
+                        stream.write_all(&out_buf).unwrap();
+                    }
                 },
 
                 _ => match inp.as_str() {
@@ -240,15 +218,24 @@ pub fn start() {
                         disconnect(&mut stream);
                         break;
                     }
-                    "/rooms" => no_param_op(codes::LIST_ROOMS, &mut stream),
-                    "/users" => no_param_op(codes::LIST_USERS, &mut stream),
+                    "/rooms" => {
+                        let out_buf: [u8; 1] = one_op_buf(codes::LIST_ROOMS);
+                        stream.write_all(&out_buf).unwrap();
+                    }
+                    "/users" => {
+                        let out_buf: [u8; 1] = one_op_buf(codes::LIST_USERS);
+                        stream.write_all(&out_buf).unwrap();
+                    }
                     "/help" => {
                         help();
                     }
                     "/" => {
-                        println!("Invalid command");
+                        eprintln!("Invalid command");
                     }
-                    _ => one_param_op(codes::MESSAGE, &mut stream, &inp),
+                    _ => {
+                        let out_buf: Vec<u8> = one_param_buf(codes::MESSAGE, &inp);
+                        stream.write_all(&out_buf).unwrap();
+                    }
                 },
             }
         }

@@ -8,9 +8,9 @@ use std::{
 };
 
 use prompted::input;
-use rust_irc::{clear, codes, one_op_buf, one_param_buf, three_param_buf, two_op_buf};
-
-const SERVER_ADDRESS: &str = "0.0.0.0:6667";
+use rust_irc::{
+    clear, codes, one_op_buf, one_param_buf, three_param_buf, two_op_buf, DEFAULT_PORT,
+};
 
 #[derive(Debug)]
 struct Server {
@@ -66,7 +66,6 @@ fn message_room(room: &str, msg: &str, sender: &str, server: &Arc<Mutex<Server>>
                         let recipient_stream: Option<&mut TcpStream> = server.users.get_mut(user);
                         match recipient_stream {
                             Some(str) => {
-                                println!("Sending msg {:?}", out_buf.to_ascii_lowercase());
                                 str.write_all(&out_buf).unwrap();
                             }
                             None => {
@@ -227,7 +226,7 @@ fn message_all_senders_rooms(
     let mut guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     for room in rooms {
         let users: Vec<String> = guard.rooms.get(&room).unwrap().clone();
-        let out_buf: Vec<u8> = three_param_buf(codes::MESSAGE_ROOM, &room, &sender, &message);
+        let out_buf: Vec<u8> = three_param_buf(codes::MESSAGE_ROOM, &room, sender, message);
         for user in users {
             if !user.eq(sender) {
                 let stream: Option<&mut TcpStream> = guard.users.get_mut(&user);
@@ -339,8 +338,8 @@ fn get_rooms_of_user(server: &Arc<Mutex<Server>>, user: &str) -> Vec<String> {
     let mut result: Vec<String> = vec![];
     let guard: std::sync::MutexGuard<'_, Server> = server.lock().unwrap();
     let rooms: std::collections::hash_map::Keys<'_, String, Vec<String>> = guard.rooms.keys();
-    rooms.for_each(|room| {
-        let user_vec = guard.rooms.get(room).unwrap();
+    rooms.for_each(|room: &String| {
+        let user_vec: &Vec<String> = guard.rooms.get(room).unwrap();
         for usr in user_vec {
             if usr.eq(user) {
                 result.push(room.to_string());
@@ -352,13 +351,15 @@ fn get_rooms_of_user(server: &Arc<Mutex<Server>>, user: &str) -> Vec<String> {
 }
 
 pub fn start() {
-    let listener_result: Result<TcpListener, std::io::Error> = TcpListener::bind(SERVER_ADDRESS);
+    let mut host: String = "0.0.0.0:".to_string();
+    host.push_str(&DEFAULT_PORT.to_string());
+    let listener_result: Result<TcpListener, std::io::Error> = TcpListener::bind(host.to_owned());
     match listener_result {
         Ok(listener) => {
             let server: Arc<Mutex<Server>> = Arc::new(Mutex::new(Server::new()));
             let server_outer: Arc<Mutex<Server>> = Arc::clone(&server);
             clear();
-            println!("Server listening on {}", SERVER_ADDRESS);
+            println!("Server listening on {}", host);
 
             thread::spawn(move || {
                 for tcpstream in listener.incoming() {

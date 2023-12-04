@@ -28,6 +28,8 @@ pub mod codes {
     }
 }
 
+pub const DEFAULT_PORT: u16 = 6667;
+
 pub fn clear() {
     print!("\x1B[2J");
 }
